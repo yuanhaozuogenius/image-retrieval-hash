@@ -61,7 +61,9 @@ Baselines/**/data*/
 !BLIP2/dataset_card/
 
 
-~
+# Office 临时文件
+~$*
+
 **/cifar-*-python.tar.gz
 **/*.tar.gz
 **/*.zip
@@ -72,7 +74,6 @@ Baselines/**/data*/
 **/checkpoints/
 **/models/*.pth
 **/weight/
-*.pt
-*.pth
 *.safetensors
 *.bin
+
