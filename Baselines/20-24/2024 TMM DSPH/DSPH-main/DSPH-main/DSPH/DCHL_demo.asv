@@ -1,0 +1,72 @@
+clear 
+close all
+addpath('.\utilizes');
+nbits_set = [8,16,32,64,128];
+opt.top_K=5000;  %5000 or 50
+
+dataname ='cifar10';%Caltech256_1024£¬place205£¬nuswide21
+
+
+exp_data = load_data(dataname);
+% exp_data.traindata = normalize(exp_data.traindata, 2);
+% exp_data.testdata = normalize(exp_data.testdata, 2);
+testgnd = exp_data.testgnd;
+traingnd = exp_data.traingnd;
+X = exp_data.traindata;
+
+% anchors construct
+n_anchors = 1500;
+anchor = X(randsample( size(exp_data.traindata,1), n_anchors),:);
+Dis = EuDist2(X, anchor, 0);
+sigma = mean(min(Dis,[],2).^0.5);
+Phi_testdata = exp(-sqdist_sdh(exp_data.testdata,anchor)/(2*sigma*sigma));
+Phi_traindata = exp(-sqdist_sdh(exp_data.traindata,anchor)/(2*sigma*sigma));
+X = [Phi_traindata ; Phi_testdata];
+% X = [exp_data.traindata ; exp_data.testdata];
+%default seed
+seed = 0;
+rng('default');
+rng(seed);
+
+
+%normZeroMean
+data_our.indexTrain=1:size(exp_data.traindata,1);
+data_our.indexTest=size(exp_data.traindata,1)+1:size(exp_data.traindata,1) + size(exp_data.testdata,1);
+data_our.X = normZeroMean(X);
+data_our.X = normEqualVariance(X);
+data_our.label = double([traingnd;testgnd]);
+yt=exp_data.testgnd;
+if isvector(yt)
+    Yt = sparse(1:length(yt), double(yt), 1);
+    Yt = full(Yt)';
+else
+    Yt = yt';
+end
+Ytr=exp_data.traingnd;
+if isvector(Ytr)
+    Y = sparse(1:length(Ytr), double(Ytr), 1);
+    Y = full(Y)';
+else
+    Y = Ytr';
+end
+total_res=[];
+
+candidate_alpha=[100];%100
+for ii = 1:length(nbits_set)
+    for c_alpha = 1: length(candidate_alpha)
+        opt.alpha = candidate_alpha(c_alpha);
+        nbits = nbits_set(ii);        
+        [MAP,precision,recall,Precision_top,NDCG,trtime]=train_DCHL(data_our, opt, nbits,Y,Yt);        
+        fprintf('Bits: %d, MAP: %.4f...   \n', nbits, MAP);        
+        total_res = [total_res; MAP,Precision_top,NDCG,opt.alpha,nbits,trtime];
+    end
+    
+end
+
+% save('DCHL_place.mat','preci');
+% file_name = [num2str(dataname) '_results' '.mat'];
+% save(file_name,'total_res');
+
+
+
+

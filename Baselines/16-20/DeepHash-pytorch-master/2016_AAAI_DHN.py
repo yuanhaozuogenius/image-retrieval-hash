@@ -1,0 +1,156 @@
+from utils.tools import *
+from network import *
+
+import os
+import torch
+import torch.optim as optim
+import time
+import numpy as np
+
+torch.multiprocessing.set_sharing_strategy('file_system')
+
+
+# DHN(AAAI2016)
+# paper [Deep Hashing Network for Efficient Similarity Retrieval](http://ise.thss.tsinghua.edu.cn/~mlong/doc/deep-hashing-network-aaai16.pdf)
+# code [DeepHash-tensorflow](https://github.com/thulab/DeepHash)
+
+def get_config():
+    config = {
+        "alpha": 0.1,
+        # "optimizer":{"type":  optim.SGD, "optim_params": {"lr": 0.05, "weight_decay": 10 ** -5}},
+        "optimizer": {"type": optim.RMSprop, "optim_params": {"lr": 1e-5, "weight_decay": 10 ** -5}},
+        "info": "[DHN]",
+        "resize_size": 224,
+        # "resize_size": 256,
+        "crop_size": 224,
+        "batch_size": 64,
+        "net": AlexNet,
+        # "net":ResNet,
+        # "dataset": "cifar10",
+        "dataset": "cifar10-1",
+        # "dataset": "cifar10-2",
+        # "dataset": "coco",
+        # "dataset": "mirflickr",
+        # "dataset": "voc2012",
+        # "dataset": "imagenet",
+        # "dataset": "nuswide_21",
+        # "dataset": "nuswide_21_m",
+        # "dataset": "nuswide_81_m",
+        "epoch": 90,
+        "test_map": 15,
+        "save_path": "save/DHN",
+        # "device":torch.device("cpu"),
+        "device": torch.device("cuda:0"),
+        # "bit_list": [48],
+        "bit_list": [64],
+    }
+    config = config_dataset(config)
+    return config
+
+
+class DHNLoss(torch.nn.Module):
+    def __init__(self, config, bit):
+        super(DHNLoss, self).__init__()
+        self.U = torch.zeros(config["num_train"], bit).float().to(config["device"])
+        self.Y = torch.zeros(config["num_train"], config["n_class"]).float().to(config["device"])
+
+    def forward(self, u, y, ind, config):
+        self.U[ind, :] = u.data
+        self.Y[ind, :] = y.float()
+
+        s = (y @ self.Y.t() > 0).float()
+        inner_product = u @ self.U.t() * 0.5
+
+        likelihood_loss = (1 + (-inner_product.abs()).exp()).log() + inner_product.clamp(min=0) - s * inner_product
+
+        likelihood_loss = likelihood_loss.mean()
+
+        # quantization_loss = config["alpha"] * (u.abs() - 1).abs().mean()
+        quantization_loss = config["alpha"] * (u.abs() - 1).cosh().log().mean()
+
+        return likelihood_loss + quantization_loss
+
+
+def train_val(config, bit):
+    device = config["device"]
+    train_loader, test_loader, dataset_loader, num_train, num_test, num_dataset = get_data(config)
+    config["num_train"] = num_train
+    net = config["net"](bit).to(device)
+
+    optimizer = config["optimizer"]["type"](net.parameters(), **(config["optimizer"]["optim_params"]))
+
+    criterion = DHNLoss(config, bit)
+    if "save_path" in config:
+        clean_save_dir_keep_best(config["save_path"], config["dataset"])
+
+    Best_mAP = 0
+
+    for epoch in range(config["epoch"]):
+
+        current_time = time.strftime('%H:%M:%S', time.localtime(time.time()))
+
+        print("%s[%2d/%2d][%s] bit:%d, dataset:%s, training...." % (
+            config["info"], epoch + 1, config["epoch"], current_time, bit, config["dataset"]), end="")
+
+        net.train()
+
+        train_loss = 0
+        for image, label, ind in train_loader:
+            image = image.to(device)
+            label = label.to(device)
+
+            optimizer.zero_grad()
+            u = net(image)
+
+            loss = criterion(u, label.float(), ind, config)
+            train_loss += loss.item()
+
+            loss.backward()
+            optimizer.step()
+
+        train_loss = train_loss / len(train_loader)
+
+        print("\b\b\b\b\b\b\b loss:%.3f" % (train_loss))
+
+        if (epoch + 1) % config["test_map"] == 0:
+            # print("calculating test binary code......")
+            tst_binary, tst_label = compute_result(test_loader, net, device=device)
+
+            # print("calculating dataset binary code.......")\
+            trn_binary, trn_label = compute_result(dataset_loader, net, device=device)
+
+            # print("calculating map.......")
+            mAP = CalcTopMap(trn_binary.numpy(), tst_binary.numpy(), trn_label.numpy(), tst_label.numpy(),
+                             config["topK"])
+
+            if mAP > Best_mAP:
+                Best_mAP = mAP
+                if "cifar10-1" == config["dataset"] and epoch > 29:
+                    P, R = pr_curve(trn_binary.numpy(), tst_binary.numpy(), trn_label.numpy(), tst_label.numpy())
+                    print(f'Precision Recall Curve data:\n"DHN":[{P},{R}],')
+                if "save_path" in config:
+                    if not os.path.exists(config["save_path"]):
+                        os.makedirs(config["save_path"])
+                    print("save in ", config["save_path"])
+                save_path = config["save_path"]
+                # 替换 "-" → "_"，确保正则或文件名不会误解析
+                dataset_tag = config["dataset"].replace("-", "_")
+                # 格式化 MAP 保留固定小数位，避免路径长度混乱
+                score_str = f"{mAP:.10f}"
+                filename_prefix = f"{dataset_tag}-{score_str}"
+                # 保存模型及中间文件
+                np.save(os.path.join(save_path, f"{filename_prefix}-trn_binary.npy"), trn_binary.numpy())
+                np.save(os.path.join(save_path, f"{filename_prefix}-tst_binary.npy"), tst_binary.numpy())
+                np.save(os.path.join(save_path, f"{filename_prefix}-trn_label.npy"), trn_label.numpy())
+                np.save(os.path.join(save_path, f"{filename_prefix}-tst_label.npy"), tst_label.numpy())
+                torch.save(net.state_dict(), os.path.join(save_path, f"{filename_prefix}-model.pt"))
+            print("%s epoch:%d, bit:%d, dataset:%s, MAP:%.3f, Best MAP: %.3f" % (
+                config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))
+            print(config)
+
+
+if __name__ == "__main__":
+    config = get_config()
+    print(config)
+    for bit in config["bit_list"]:
+        train_val(config, bit)
