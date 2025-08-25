@@ -1,0 +1,61 @@
+# Python 缓存
+__pycache__/
+*.py[cod]
+*.so
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# Jupyter 输出
+.ipynb_checkpoints/
+*.nb.json
+
+# 模型文件
+*.pt
+*.pth
+
+# numpy/pickle 临时模型
+*.npy
+*.pkl
+
+# 日志和中间结果
+*.log
+*.csv
+
+# 原始数据文件
+*.tar.gz
+dataset/
+
+# 输出目录（注意首字母小写）
+save/
+results/
+output/
+runs/
+checkpoints/
+
+
+# 构建产物
+*.egg-info/
+dist/
+build/
+
+# 系统文件
+.DS_Store
+*.swp
+*.bak
+*.tmp
+
+# IDE 配置
+.vscode/
+.idea/
+
+
+
+# 忽略根和 Baselines 下以 data 开头的目录
+/data*/
+Baselines/**/data*/
+# 若需要保留：
+!BLIP2/data/
+!BLIP2/dataset_card/
