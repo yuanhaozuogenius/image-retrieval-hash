@@ -59,4 +59,20 @@ Baselines/**/data*/
 # 若需要保留：
 !BLIP2/data/
 !BLIP2/dataset_card/
+
+
 ~
+**/cifar-*-python.tar.gz
+**/*.tar.gz
+**/*.zip
+**/save/
+**/result/
+**/results/
+**/runs/
+**/checkpoints/
+**/models/*.pth
+**/weight/
+*.pt
+*.pth
+*.safetensors
+*.bin
