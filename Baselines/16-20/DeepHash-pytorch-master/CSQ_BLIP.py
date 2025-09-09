@@ -41,8 +41,9 @@ def get_config():
         "epoch": 150,
         "test_map": 10,
         "device": torch.device("cuda:0"),
-        "bit_list": [64],# 哈希码位数
+        "bit_list": [64],  # 哈希码位数
         "save_path": "save/CSQ_BLIP",
+        "cifar10_dir": r"D:\Datasets\cifar10"
     }
     config = config_dataset(config)
     return config

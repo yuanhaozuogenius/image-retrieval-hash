@@ -130,6 +130,7 @@ class MyCIFAR10(dsets.CIFAR10):
 """
 def cifar_dataset(config):
     batch_size = config["batch_size"]
+    cifar_dir = config["cifar10_dir"]
 
     train_size = 500
     test_size = 100
@@ -143,18 +144,19 @@ def cifar_dataset(config):
         transforms.ToTensor(),
         transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
     ])
-    cifar_dataset_root = 'dataset/cifar/'
+    # cifar_dataset_root = 'dataset/cifar/'
+
     # Dataset
-    train_dataset = MyCIFAR10(root=cifar_dataset_root,
+    train_dataset = MyCIFAR10(root=cifar_dir,
                               train=True,
                               transform=transform,
                               download=True)
 
-    test_dataset = MyCIFAR10(root=cifar_dataset_root,
+    test_dataset = MyCIFAR10(root=cifar_dir,
                              train=False,
                              transform=transform)
 
-    database_dataset = MyCIFAR10(root=cifar_dataset_root,
+    database_dataset = MyCIFAR10(root=cifar_dir,
                                  train=False,
                                  transform=transform)
 
