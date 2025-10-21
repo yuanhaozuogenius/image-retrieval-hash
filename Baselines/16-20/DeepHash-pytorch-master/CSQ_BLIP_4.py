@@ -1,4 +1,3 @@
-import gc
 import os
 import sys
 
@@ -28,6 +27,7 @@ from PIL import Image
 import time
 from BLIP2.to_vector import build_text_encoder
 from BLIP2.to_label import build_image_captioner
+import torch, gc
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -64,10 +64,14 @@ def get_config():
         "text_adapter_lr_mult": 0.5,  # 给文本adapter一个更小的 lr（乘数）
 
         # 图生文
-        "caption_num_beams": 3,  # 建议 ≥2 以保证 sequences_scores 可用
+        "caption_num_beams": 1,  # 建议 ≥2 以保证 sequences_scores 可用
         "caption_max_new_tokens": 32,  # 句长上限（越大越慢）
         "caption_sampling_k": 3,  # 固定采样数 K
-        # "caption_prompt": "a photo of",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
+        # "caption_prompt": "a photo of a {}",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
+
+        # 同近异远
+        "contrast_temp": 0.07,  # InfoNCE 温度
+        "contrast_weight": 1.0,  # λ=1
 
         # —— 相对路径—— #
         "blip_dir": r"D:\Models\blip2-opt-2.7b",
@@ -299,7 +303,7 @@ def precompute_class_captions(
         for i, c in enumerate(y_idx):
             if c not in need_classes:
                 continue
-            if len(picked_imgs[c]) >= K:  # 由于 DataLoader自身已经shuffle，所以对于K来说每次采到仍然是随机的。
+            if len(picked_imgs[c]) >= K:
                 continue
             picked_imgs[c].append(images[i].detach().cpu())  # 暂存图像
             picked_abs[c].append(str(paths[i]))  # 直接用 paths，避免索引错位
@@ -375,7 +379,7 @@ def train_val(config, bit):
         K=K,
         prompt=prompt,
         device=device
-    )  # Dict[int, List[str]]
+    )
 
     # 释放 captioner 显存
     if torch.cuda.is_available():
@@ -393,9 +397,48 @@ def train_val(config, bit):
                         blip_dir=config.get("blip_dir", config.get("model_dir", r"D:\Models\blip2-opt-2.7b")),
                         ).to(device)
 
-    # 从 JSONL 缓存加载按类缓存的“唯一 caption”（若不存在则为空）
-    cache_path = config.get("caption_save_path")
-    print(f"[caption-cache] loaded {len(class2caps)} classes from {cache_path}")
+    # 若仍有缺失，补占位（稳妥）
+    n_class = config.get("n_class", 0) or 10
+    for c in range(n_class):
+        if c not in class2caps or not class2caps[c]:
+            class2caps[c] = f"class {c}"
+    # print(f"[caption-cache] loaded {len(class2cap)} classes from {cache_path}")
+
+    # ========= 构建 Prompt/Caption 两个文本库（bank） =========
+    # 1) 类名获取
+    class_names = None
+    if class_names is None:
+        if str(config.get("dataset", "")).lower() in ["cifar10", "cifar-10"]:
+            class_names = CIFAR10_LABELS
+        else:
+            class_names = [f"class {c}" for c in range(n_class)]
+
+    # 2) Prompt bank（正样本锚等于类名或者类名直接拼接而成的prompts）：每类 1 条 prompt
+    prompt_texts = make_prompt_texts(prompt, class_names)
+    with torch.no_grad():
+        prompt_bank = net.text_encoder.encode(prompt_texts).to(device)  # [C, D]
+        prompt_bank = F.normalize(prompt_bank, dim=-1)
+
+    # 3) Caption bank（负样本全集，逐条；并记录其类ID以便屏蔽本类）
+    neg_texts, neg_cls_ids = [], []
+    for c in range(n_class):
+        caps = class2caps.get(c, [])
+        for t in caps:
+            if isinstance(t, str) and t.strip(): # 当 t 是字符串并且不全是空格时
+                neg_texts.append(t.strip())
+                neg_cls_ids.append(c)
+
+    with torch.no_grad():
+        if len(neg_texts) > 0:
+            caption_bank = net.text_encoder.encode(neg_texts).to(device)  # [Nneg, D]
+            caption_bank = F.normalize(caption_bank, dim=-1)
+            # 把列表转为张量,后续才能在GPU 上做矩阵比较
+            # 稍后训练时需要计算每个图像样本的类索引与所有 caption 的类索引是否相同；
+            # 如果相同，就要把这些 caption 当作“本类”并屏蔽掉（不作为负样本）
+            neg_cls_ids = torch.tensor(neg_cls_ids, device=device, dtype=torch.long)  # [Nneg]
+
+    tau = float(config.get("contrast_temp", 0.07))
+    contrast_weight = float(config.get("contrast_weight", 1.0))
 
     # 优化器（分组：fc1 / hash head / fc2）
     base_optim = config["optimizer"]
@@ -412,8 +455,8 @@ def train_val(config, bit):
     align_weight = float(config.get("align_weight", 1.0))
     beta = float(config.get("text_anchor_weight", 0.05))
     # 扫描当前 save/算法名/ 文件夹，找到得分最高（mAP 最大）的一组前缀，然后删除其余所有 .pt 和 .npy 文件，只保留那一组
-    if "save_path" in config:
-        clean_save_dir_keep_best(config["save_path"], config["dataset"])
+    # if "save_path" in config:
+    #     clean_save_dir_keep_best(config["save_path"], config["dataset"])
     Best_mAP = 0
 
     for epoch in range(config["epoch"]):
@@ -424,53 +467,98 @@ def train_val(config, bit):
         csq_loss_meter = 0.0
         align_loss_meter = 0.0
         id_loss_meter = 0.0
+        contrast_loss_meter = 0.0
 
         for images, labels, ind, paths in train_loader:
-            images = images.to(device)  # [B,3,H,W]
+
+            # ====== 进入一个 batch ======
+
+
+            # —— 搬到 GPU —— #
+            images = images.to(device, non_blocking=True)
             if isinstance(labels, np.ndarray):
                 labels = torch.from_numpy(labels)
-            labels = labels.to(device).float()  # [B, n_class]
+            labels = labels.to(device).float()
+            if torch.cuda.is_available(): torch.cuda.synchronize()
 
+            # —— 文本侧：从 prompt_bank 取正样本锚 —— #
             with torch.no_grad():
-                # 用 captioner(image) 直接生成对齐文本（带缓存）
-                y_idx = torch.argmax(labels, dim=1).detach().cpu().tolist()  # 1) 本批的类索引
+                if labels.ndim == 2 and labels.size(1) == 1:
+                    y_idx = labels.view(-1).long()
+                else:
+                    y_idx = labels.argmax(dim=1).long()
 
-                # 4) 组装整批 captions：每个样本直接复用其类的 caption
-                captions = [
-                    (class2caps[c][0] if isinstance(class2caps[c], list) and len(class2caps[c]) > 0 else f"class {c}")
-                    for c in y_idx
-                ]
-                t256 = net.text_encoder.encode(captions).to(device)  # [B,256]
+                # 调试更稳：用 CPU 做索引再搬回 GPU，避免 GPU 高级索引隐式同步
+                y_idx_cpu = y_idx.detach().cpu()
+                t256 = prompt_bank[y_idx_cpu].to(device)
+            if torch.cuda.is_available(): torch.cuda.synchronize()
 
-                t256 = F.normalize(t256, dim=-1)
 
-            optimizer.zero_grad()
+            # —— 清梯度（更轻量） —— #
+            optimizer.zero_grad(set_to_none=True)
 
-            # —— 视觉侧：取冻结的 v256；通过 img_adapter（可训练）得到 v_adapt(fc1)—— #
+            # —— 视觉侧（冻结 BLIP 编码到 256） —— #
             with torch.no_grad():
-                v256 = net.encode_image_to_256(images)  # [B,256] 冻结 BLIP
-            v_adapt = net.img_adapter(v256)  # [B,256] ★ 可训练分支
-            # 文本侧适配：fc2
-            t_adapt = net.text_adapter(t256)  # fc2: [B,256]
+                v256 = net.encode_image_to_256(images)  # [B,256]
+            if torch.cuda.is_available(): torch.cuda.synchronize()
 
-            # —— 哈希向量（bit）（可训练）—— #
+
+            # —— 适配层与哈希头 —— #
+            v_adapt = net.img_adapter(v256)  # [B,256]
+            t_adapt = net.text_adapter(t256)  # [B,256]
+            if torch.cuda.is_available(): torch.cuda.synchronize()
+
+
             u = net.mapper(v_adapt)  # [B,bit]
+            if torch.cuda.is_available(): torch.cuda.synchronize()
 
-            # 损失
+
+            # —— 损失 —— #
             align_loss = align_criterion(v_adapt, t_adapt)
-
-            # —— 总损失：CSQ(u, y) + α·align(fc1, fc2) + β·id_loss —— #
-            id_loss = F.mse_loss(F.normalize(t_adapt, dim=-1), t256)  # 文本锚定正则：防止 fc2 远离原始 t256 语义
+            id_loss = F.mse_loss(F.normalize(t_adapt, dim=-1), t256)
             csq_loss = csq_criterion(u, labels, ind, config)
-            total_loss = csq_loss + align_weight * align_loss + beta * id_loss
+
+            # 对比损失（正：prompt；负：caption_pool）
+            img_feats = F.normalize(v_adapt, dim=-1)  # [B,256]
+            pos_vecs = t256  # [B,256]
+            pos_logits = (img_feats * pos_vecs).sum(dim=1, keepdim=True) / tau
+
+            if caption_bank.size(0) > 0:
+                # 可选：如太慢，这里可以开启负样本子采样
+                # Nkeep = min(1024, caption_bank.size(0))
+                # perm  = torch.randperm(caption_bank.size(0), device=device)[:Nkeep]
+                # bank, neg_ids = caption_bank.index_select(0, perm), neg_cls_ids.index_select(0, perm)
+                bank, neg_ids = caption_bank, neg_cls_ids
+
+                neg_logits_all = (img_feats @ bank.t()) / tau  # [B, Nneg]
+                mask = (neg_ids.unsqueeze(0) == y_idx.unsqueeze(1))  # [B, Nneg]
+                neg_logits_all = neg_logits_all.masked_fill(mask, -1e4)
+                logits = torch.cat([pos_logits, neg_logits_all], dim=1)  # [B, 1+Nneg]
+                targets = torch.zeros(logits.size(0), dtype=torch.long, device=device)
+                contrast_loss = F.cross_entropy(logits, targets)
+            else:
+                contrast_loss = torch.tensor(0.0, device=device)
+
+            if torch.cuda.is_available(): torch.cuda.synchronize()
+
+
+            total_loss = csq_loss + align_weight * align_loss + beta * id_loss + contrast_weight * contrast_loss
+
 
             total_loss.backward()
-            optimizer.step()
 
+
+            optimizer.step()
+            if torch.cuda.is_available(): torch.cuda.synchronize()
+
+
+            # —— 统计 —— #
             train_loss += total_loss.item()
             csq_loss_meter += csq_loss.item()
             align_loss_meter += align_loss.item()
             id_loss_meter += id_loss.item()
+            contrast_loss_meter += contrast_loss.item()
+
 
         # 统计并打印 每个 batch 的 loss 会抖动,把整轮（epoch）里所有 batch 的 loss 求平均
         n_iter = len(train_loader)  # batch 数
@@ -478,13 +566,16 @@ def train_val(config, bit):
         csq_loss_avg = csq_loss_meter / n_iter
         align_loss_avg = align_loss_meter / n_iter
         id_loss_avg = id_loss_meter / n_iter
+        contrast_loss_avg = contrast_loss_meter / n_iter
+
         lr = optimizer.param_groups[0].get("lr", None)
         lr_str = f"{lr:.1e}" if lr is not None else "NA"
         print(f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
               f"bit:{bit}, dataset:{config['dataset']}, "
               f"loss:{train_loss_avg:.3f} "
               f"(csq:{csq_loss_avg:.3f}, align:{align_loss_avg:.3f}, id:{id_loss_avg:.3f}, "
-              f"α={align_weight:.2f}, β={beta:.2f}, mode:{config.get('align_mode', 'mse')})")
+              f"contrast:{contrast_loss_avg:.3f}, α={align_weight:.2f}, β={beta:.2f}, λ={contrast_weight:.2f}, τ={tau:.2f}, "
+              f"mode:{config.get('align_mode', 'mse')})")
         # 评估与保存
         if (epoch + 1) % config["test_map"] == 0:
             tst_binary, tst_label = compute_result(test_loader, net, device=device)
