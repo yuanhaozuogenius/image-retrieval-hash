@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="1d5df9e1-3d70-45d6-84bb-853f8d6aa854" name="Changes" comment="">
+      <change afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/data/cifar10-image/database.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/data/cifar10-image/test.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/data/cifar10-image/train.txt" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../Baselines/20-24/2021 NIPS OrthoHash/.idea/.gitignore" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../Baselines/20-24/2021 NIPS OrthoHash/.idea/2021 NIPS OrthoHash.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../Baselines/20-24/2021 NIPS OrthoHash/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../Baselines/20-24/2021 NIPS OrthoHash/.idea/misc.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../Baselines/20-24/2021 NIPS OrthoHash/.idea/modules.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../Baselines/20-24/2021 NIPS OrthoHash/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM SPRCH/.idea/2024 TMM SPRCH.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM SPRCH/.idea/inspectionProfiles/Project_Default.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../blip2/imgs/0007.jpg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../blip2/imgs/0037.jpg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../blip2/imgs/0038.jpg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../blip2/imgs/0039.jpg" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/../blip2/imgs/0040.jpg" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2016_AAAI_DHN.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2016_AAAI_DHN.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2016_CVPR_DSH.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2016_CVPR_DSH.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2016_IJCAI_DPSH.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2016_IJCAI_DPSH.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2017_ICCV_HashNet.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2017_ICCV_HashNet.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2017_IJCAI_LCDSH.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2017_IJCAI_LCDSH.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2017_MM_DAPH.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2017_MM_DAPH.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2017_NIPS_DSDH.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2017_NIPS_DSDH.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2018_AAAI_ADSH.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2018_AAAI_ADSH.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2018_CVPR_DCH.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2018_CVPR_DCH.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2018_NIPS_GreedyHash.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2018_NIPS_GreedyHash.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2019_BMVC_DFH.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2019_BMVC_DFH.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2019_TMM_IDHN.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2019_TMM_IDHN.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2020_CVPR_CSQ.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2020_CVPR_CSQ.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2020_IJCAI_DPN.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/2020_IJCAI_DPN.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/CSQ_BLIP.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/CSQ_BLIP.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/CSQ_BLIP_2.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/CSQ_BLIP_2.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/CSQ_BLIP_3.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/CSQ_BLIP_3.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/CSQ_BLIP_ONLY.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/CSQ_BLIP_ONLY.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/utils/tools.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/16-20/DeepHash-pytorch-master/utils/tools.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/2024 TMM Dual Self-Paced Hashing for Image Retrieval.pdf" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/DCHL_demo.asv" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/DSPH_demo.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/DCHL.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/EuDist2.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/NormalizeFea.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/Schmidt.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/cal_map.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/compactbit.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/hammingDist.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/hash_const.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/load_data.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/ndcg2_k.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/normEqualVariance.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/normZeroMean.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/precision_at_k.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/precision_recall.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/sgn.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/sqdist_sdh.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/DSPH/utilizes/train_DCHL.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM DSPH/DSPH-main/DSPH-main/README.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/2024 TMM Relaxed Energy Preserving Hashing for Image Retrieval.pdf" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/demo_main.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/EPH.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/EuDist2.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/NormalizeFea.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/Schmidt.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/cal_map.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/compactbit.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/hammingDist.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/hash_const.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/load_data.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/mAP.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/myOrth.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/ndcg2_k.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/normEqualVariance.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/normZeroMean.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/precision_at_k.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/precision_recall.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/recall_precision.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/sgn.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/sqdist_sdh.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM REPH/REPH_main-master/REPH_main-master/utils/train_EPH.m" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM SPRCH/SPRCH-main/SPRCH-main/main.py" beforeDir="false" afterPath="$PROJECT_DIR$/../../Baselines/20-24/2024 TMM SPRCH/SPRCH-main/SPRCH-main/main.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ++/data/cifar-10-batches-py/batches.meta" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ++/data/cifar-10-batches-py/data_batch_1" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ++/data/cifar-10-batches-py/data_batch_2" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ++/data/cifar-10-batches-py/data_batch_3" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ++/data/cifar-10-batches-py/data_batch_4" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ++/data/cifar-10-batches-py/data_batch_5" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ++/data/cifar-10-batches-py/test_batch" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ+/.idea/CSQ+.iml" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ+/data/car_ims/database.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ+/data/car_ims/test.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ+/data/car_ims/train.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ+/data/nabirds/database.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ+/data/nabirds/test.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../CSQ+/data/nabirds/train.txt" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/../blip2/to_label_conditional.py" beforeDir="false" afterPath="$PROJECT_DIR$/../blip2/to_label_conditional.py" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FlaskConsoleOptions" custom-start-script="import sys; print('Python %s on %s' % (sys.version, sys.platform)); sys.path.extend([WORKING_DIR_AND_PYTHON_PATHS])&#10;from flask.cli import ScriptInfo, NoAppException&#10;for module in [&quot;main.py&quot;, &quot;wsgi.py&quot;, &quot;app.py&quot;]:&#10;    try: locals().update(ScriptInfo(app_import_path=module, create_app=None).load_app().make_shell_context()); print(&quot;\nFlask App: %s&quot; % app.import_name); break&#10;    except NoAppException: pass">
+    <envs>
+      <env key="FLASK_APP" value="app" />
+    </envs>
+    <option name="myCustomStartScript" value="import sys; print('Python %s on %s' % (sys.version, sys.platform)); sys.path.extend([WORKING_DIR_AND_PYTHON_PATHS])&#10;from flask.cli import ScriptInfo, NoAppException&#10;for module in [&quot;main.py&quot;, &quot;wsgi.py&quot;, &quot;app.py&quot;]:&#10;    try: locals().update(ScriptInfo(app_import_path=module, create_app=None).load_app().make_shell_context()); print(&quot;\nFlask App: %s&quot; % app.import_name); break&#10;    except NoAppException: pass" />
+    <option name="myEnvs">
+      <map>
+        <entry key="FLASK_APP" value="app" />
+      </map>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$/../.." />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;yuanhaozuogenius&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;git@github.com:yuanhaozuogenius/image-retrieval-hash.git&quot;,
+    &quot;accountId&quot;: &quot;a71937cf-ea03-4f5e-bf36-1f39043a084c&quot;
+  }
+}</component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 8
+}</component>
+  <component name="ProjectId" id="32njYmuPwE3dealykHfNmg2fiDc" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;master&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;F:/Docs/Code/image-retrieval-hash/Reviewed/SPRCH&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;com.jetbrains.python.configuration.PyActiveSdkModuleConfigurable&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  }
+}</component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-js-predefined-d6986cc7102b-f27c65a3e318-JavaScript-PY-251.23774.444" />
+        <option value="bundled-python-sdk-890ed5b35930-d9c5bdb153f4-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-251.23774.444" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="1d5df9e1-3d70-45d6-84bb-853f8d6aa854" name="Changes" comment="" />
+      <created>1758063281222</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1758063281222</updated>
+      <workItem from="1758063285285" duration="28000" />
+      <workItem from="1758064265921" duration="7127000" />
+      <workItem from="1758080044871" duration="2474000" />
+    </task>
+    <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
+  </component>
+</project>

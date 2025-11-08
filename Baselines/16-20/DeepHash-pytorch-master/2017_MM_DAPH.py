@@ -29,7 +29,7 @@ def get_config():
         "net": AlexNet,
         # "net":ResNet,
         # "dataset": "cifar10",
-        "dataset": "cifar10-1",
+        "dataset": "cifar10",
         # "dataset": "cifar10-2",
         # "dataset": "coco",
         # "dataset": "mirflickr",

@@ -1,10 +1,6 @@
 from tkinter.tix import Tree
 from scripts.head import *
 import torch
-import numpy as np
-import random
-from dataset.online_loader import *
-from tqdm import tqdm
 import torch.nn.functional as F
 
 
@@ -45,13 +41,13 @@ def get_config():
 
             },
         },
-        # "resize_size": 256,
         "resize_size": 224,
         "crop_size": 224,
         "batch_size": 64,
-        "net": MoCo,
+        "net": ResNet,
         # "dataset": "car_ims",
-        "dataset": "cifar10",
+        "dataset": "coco",
+        # "dataset": "cifar10-1",
         "without_BN": False,
         "epoch": 100,
         "test_map": 5,
@@ -61,7 +57,6 @@ def get_config():
         # "save_center": "./results/imagenet/OurLossWithPair/Ours_64.npy",
         "device": torch.device('cuda'),
         "n_gpu": torch.cuda.device_count(),
-        # "bit_list": [16],
         "bit_list": [64],
         # "info": "[OurLossWithPair]",
         # "loss_way": "OurLossWithPair",
@@ -259,27 +254,3 @@ def get_precision_recall_by_Hamming_Radius(database_data, database_label, query_
             mAPX.append(np.float(0.0))
 
     return np.mean(np.array(precX)), np.mean(np.array(recX)), np.mean(np.array(mAPX))
-
-
-def save_map_result(config, bit, Best_map, start_time, end_time):
-    """保存 mAP 结果到 map_result.txt，格式为 JSON"""
-    save_dir = f'./results/{config["dataset"]}/{config["loss_way"]}'
-    os.makedirs(save_dir, exist_ok=True)
-
-    log_dict = {
-        "bit": bit,
-        "best_mAP": float(Best_map),
-        "start_time": str(start_time),
-        "end_time": str(end_time),
-        "dataset": config["dataset"],
-        "batch_size": config["batch_size"],
-        "epoch": config["epoch"],
-        "optimizer": config["optimizer"]["type"].__name__,
-        "lr": config["optimizer"]["optim_param"]["lr"],
-        "weight_decay": config["optimizer"]["optim_param"]["weight_decay"],
-        "net": config["net"].__name__,
-        "remarks": config["remarks"],
-    }
-
-    with open(os.path.join(save_dir, "map_result.txt"), "a") as f:
-        f.write(json.dumps(log_dict, indent=2) + "\n")

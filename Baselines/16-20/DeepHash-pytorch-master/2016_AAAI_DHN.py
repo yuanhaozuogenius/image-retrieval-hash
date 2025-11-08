@@ -27,17 +27,17 @@ def get_config():
         "net": AlexNet,
         # "net":ResNet,
         # "dataset": "cifar10",
-        "dataset": "cifar10-1",
         # "dataset": "cifar10-2",
-        # "dataset": "coco",
+        "dataset": "coco",
+        "image_root": r"D:\Datasets\coco2017",
         # "dataset": "mirflickr",
         # "dataset": "voc2012",
         # "dataset": "imagenet",
         # "dataset": "nuswide_21",
         # "dataset": "nuswide_21_m",
         # "dataset": "nuswide_81_m",
-        "epoch": 90,
-        "test_map": 15,
+        "epoch": 120,
+        "test_map": 40,
         "save_path": "save/DHN",
         # "device":torch.device("cpu"),
         "device": torch.device("cuda:0"),
@@ -95,7 +95,7 @@ def train_val(config, bit):
         net.train()
 
         train_loss = 0
-        for image, label, ind in train_loader:
+        for image, label, ind, paths in train_loader:
             image = image.to(device)
             label = label.to(device)
 
@@ -125,7 +125,7 @@ def train_val(config, bit):
 
             if mAP > Best_mAP:
                 Best_mAP = mAP
-                if "cifar10-1" == config["dataset"] and epoch > 29:
+                if "cifar10" == config["dataset"] and epoch > 29:
                     P, R = pr_curve(trn_binary.numpy(), tst_binary.numpy(), trn_label.numpy(), tst_label.numpy())
                     print(f'Precision Recall Curve data:\n"DHN":[{P},{R}],')
                 if "save_path" in config:
@@ -139,11 +139,11 @@ def train_val(config, bit):
                 score_str = f"{mAP:.10f}"
                 filename_prefix = f"{dataset_tag}-{score_str}"
                 # 保存模型及中间文件
-                np.save(os.path.join(save_path, f"{filename_prefix}-trn_binary.npy"), trn_binary.numpy())
-                np.save(os.path.join(save_path, f"{filename_prefix}-tst_binary.npy"), tst_binary.numpy())
-                np.save(os.path.join(save_path, f"{filename_prefix}-trn_label.npy"), trn_label.numpy())
-                np.save(os.path.join(save_path, f"{filename_prefix}-tst_label.npy"), tst_label.numpy())
-                torch.save(net.state_dict(), os.path.join(save_path, f"{filename_prefix}-model.pt"))
+                # np.save(os.path.join(save_path, f"{filename_prefix}-trn_binary.npy"), trn_binary.numpy())
+                # np.save(os.path.join(save_path, f"{filename_prefix}-tst_binary.npy"), tst_binary.numpy())
+                # np.save(os.path.join(save_path, f"{filename_prefix}-trn_label.npy"), trn_label.numpy())
+                # np.save(os.path.join(save_path, f"{filename_prefix}-tst_label.npy"), tst_label.numpy())
+                # torch.save(net.state_dict(), os.path.join(save_path, f"{filename_prefix}-model.pt"))
             print("%s epoch:%d, bit:%d, dataset:%s, MAP:%.3f, Best MAP: %.3f" % (
                 config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))
             print(config)

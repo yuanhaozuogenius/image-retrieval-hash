@@ -22,7 +22,7 @@ import torch.nn.functional as F
 from scipy.linalg import hadamard  # direct import  hadamrd matrix from scipy
 import random
 import time
-from BLIP2.to_vector import build_text_encoder, labels_to_text
+from BLIP2.to_vector import build_text_encoder
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -40,13 +40,16 @@ def get_config():
         "crop_size": 224,
         "batch_size": 64,
         "net": build_blip_net,
-        "dataset": "cifar10-1",
+        # "dataset": "cifar10",
+        "dataset": "coco",
         "epoch": 120,
         "test_map": 10,
         "device": torch.device("cuda:0"),
         "bit_list": [64],
         "save_path": "save/CSQ_BLIP_2",
-        "cifar10_dir": r"D:\Datasets\cifar10",
+        # "image_root": r"D:\Datasets\cifar10-image",
+        "image_root": r"D:\Datasets\coco2017",
+
         # —— 跨模态对齐控制 —— #
         # 对齐损失权重（0.5~2.0 之间微调）
         # 若发现 CSQ 很好但对齐很弱（Align 维持很小且总 mAP 没涨），试着加到 1.5–2.0；
@@ -66,17 +69,6 @@ def get_config():
     }
     config = config_dataset(config)
     return config
-
-
-# 可选：BLIP 的标准归一化，当前训练不直接用这个 transform
-blip_transform = transforms.Compose([
-    transforms.Resize((224, 224), interpolation=InterpolationMode.BICUBIC),
-    transforms.ToTensor(),
-    transforms.Normalize(
-        mean=(0.48145466, 0.4578275, 0.40821073),
-        std=(0.26862954, 0.26130258, 0.27577711)
-    )
-])
 
 
 class FeatureMapper(nn.Module):
@@ -227,6 +219,7 @@ class AlignmentLoss(nn.Module):
 def train_val(config, bit):
     device = config["device"]
     train_loader, test_loader, dataset_loader, num_train, num_test, num_dataset = get_data(config)
+
     config["num_train"] = num_train
     # net = config["net"](bit).to(device)
     net = config["net"](bit,
@@ -251,12 +244,18 @@ def train_val(config, bit):
     align_criterion = AlignmentLoss(mode=config.get("align_mode", "mse"))
     align_weight = float(config.get("align_weight", 1.0))
     beta = float(config.get("text_anchor_weight", 0.05))
+
     # 扫描当前 save/算法名/ 文件夹，找到得分最高（mAP 最大）的一组前缀，然后删除其余所有 .pt 和 .npy 文件，只保留那一组
     if "save_path" in config:
         clean_save_dir_keep_best(config["save_path"], config["dataset"])
     Best_mAP = 0
-    # ★ 准备一个 label->text 的映射（单标签：argmax；多标签：平均或加权平均）
+    # 预编码类文本向量,
+    # 单标签：t256 = class_bank[y_idx]
+    # 多标签：对该样本的所有正类，从 class_bank 取向量后均值。
     is_single_label = config["dataset"] not in {"nuswide_21", "nuswide_21_m", "coco"}
+    print("is_single_label:", is_single_label)
+    # class_bank存储向量化后的class names ['person', 'bicycle', ...]
+    class_bank = get_class_bank(net, device, cache_path="data/coco/class_bank.pt")
 
     for epoch in range(config["epoch"]):
         current_time = time.strftime('%H:%M:%S', time.localtime(time.time()))
@@ -269,35 +268,29 @@ def train_val(config, bit):
         align_loss_meter = 0.0
         id_loss_meter = 0.0
 
-        for image, label, ind in train_loader:
+        for image, label, ind, paths in train_loader:
             image = image.to(device)  # [B,3,H,W]
             if isinstance(label, np.ndarray):
                 label = torch.from_numpy(label)
-            label = label.to(device).float()  # [B, n_class]
+            label = label.to(device).float()  # [B, n_class] Tensor[64, 80]
 
-            # —— 文本侧：根据 batch 的标签生成文本并编码为 t256（冻结）—— #
+            # —— 文本侧：从 class_bank 构造 t256 —— #
             with torch.no_grad():
                 if is_single_label:
-                    y_idx = torch.argmax(label, dim=1).detach().cpu().tolist()  # List[int]
-                    y_text = labels_to_text(y_idx)  # List[str]
-                    t256 = net.text_encoder.encode(y_text).to(device)  # [B,256]
+                    y_idx = torch.argmax(label, dim=1)  # [B] Tensor[64]
+                    t256 = class_bank[y_idx]  # [B,256]
+                    t256 =F.normalize(t256, dim=-1)
                 else:
-                    # 多标签：对每个样本正标签类文本编码后求均值
-                    idxs_list = [torch.where(label[b] > 0.5)[0].detach().cpu().tolist()
-                                 for b in range(label.size(0))]
-                    idxs_list = [ids if len(ids) > 0 else [int(torch.argmax(label[b]).item())]
-                                 for b, ids in enumerate(idxs_list)]
-                    flat_text = [txt for ids in idxs_list for txt in labels_to_text(ids)]
-                    flat_emb = net.text_encoder.encode(flat_text).to(device)  # [sum_k,256]
-                    ptr = 0;
+                    # 多标签：每张图有多个正类 → 对这些类的向量取均值
                     t_list = []
-                    for ids in idxs_list:
-                        k = len(ids)
-                        t_i = flat_emb[ptr:ptr + k].mean(dim=0, keepdim=True)  # [1,256]
-                        ptr += k
+                    for b in range(label.size(0)):
+                        ids = torch.where(label[b] > 0.5)[0]  # 当前样本的正类索引
+                        if ids.numel() == 0:  # 没有正类则取 argmax 回退
+                            ids = torch.argmax(label[b]).view(1)
+                        t_i = class_bank[ids].mean(dim=0, keepdim=True)  # 取这些类向量的均值
+                        t_i = F.normalize(t_i, dim=-1) # 均值操作会破坏单位长度, 多标签平均后再单位化
                         t_list.append(t_i)
                     t256 = torch.cat(t_list, dim=0)  # [B,256]
-                t256 = F.normalize(t256, dim=-1)
 
             optimizer.zero_grad()
 

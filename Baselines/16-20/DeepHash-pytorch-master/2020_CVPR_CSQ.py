@@ -18,7 +18,7 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 # code [CSQ-pytorch](https://github.com/yuanli2333/Hadamard-Matrix-for-hashing)
 
 # AlexNet
-# [CSQ] epoch:65, bit:64, dataset:cifar10-1, MAP:0.787, Best MAP: 0.790
+# [CSQ] epoch:65, bit:64, dataset:cifar10, MAP:0.787, Best MAP: 0.790
 # [CSQ] epoch:90, bit:16, dataset:imagenet, MAP:0.593, Best MAP: 0.596, paper:0.601
 # [CSQ] epoch:150, bit:64, dataset:imagenet, MAP:0.698, Best MAP: 0.706, paper:0.695
 # [CSQ] epoch:40, bit:16, dataset:nuswide_21, MAP:0.784, Best MAP: 0.789
@@ -37,17 +37,18 @@ def get_config():
         "resize_size": 224,
         # "resize_size": 256,
         "crop_size": 224,
-        "batch_size": 128,
-        # "batch_size": 64,
+        # "batch_size": 128,
+        "batch_size": 64,
         # "net": AlexNet,
         "net": ResNet,
-        "dataset": "cifar10-1",
+        # "dataset": "cifar10",
         # "dataset": "imagenet",
-        # "dataset": "coco",
+        "dataset": "coco",
+        "image_root": r"D:\Datasets\coco2017",
         # "dataset": "nuswide_21",
         # "dataset": "nuswide_21_m",
-        "epoch": 150,
-        "test_map": 10,
+        "epoch": 80,
+        "test_map": 40,
         # "device":torch.device("cpu"),
         "device": torch.device("cuda:0"),
         "bit_list": [64],
@@ -143,7 +144,7 @@ def train_val(config, bit):
         net.train()
 
         train_loss = 0
-        for image, label, ind in train_loader:
+        for image, label, ind, path in train_loader:
             image = image.to(device)
             label = label.to(device)
 
@@ -187,11 +188,11 @@ def train_val(config, bit):
                     filename_prefix = f"{dataset_tag}-{score_str}"
 
                     # 保存模型及中间文件
-                    np.save(os.path.join(save_path, f"{filename_prefix}-trn_binary.npy"), trn_binary.numpy())
-                    np.save(os.path.join(save_path, f"{filename_prefix}-tst_binary.npy"), tst_binary.numpy())
-                    np.save(os.path.join(save_path, f"{filename_prefix}-trn_label.npy"), trn_label.numpy())
-                    np.save(os.path.join(save_path, f"{filename_prefix}-tst_label.npy"), tst_label.numpy())
-                    torch.save(net.state_dict(), os.path.join(save_path, f"{filename_prefix}-model.pt"))
+                    # np.save(os.path.join(save_path, f"{filename_prefix}-trn_binary.npy"), trn_binary.numpy())
+                    # np.save(os.path.join(save_path, f"{filename_prefix}-tst_binary.npy"), tst_binary.numpy())
+                    # np.save(os.path.join(save_path, f"{filename_prefix}-trn_label.npy"), trn_label.numpy())
+                    # np.save(os.path.join(save_path, f"{filename_prefix}-tst_label.npy"), tst_label.numpy())
+                    # torch.save(net.state_dict(), os.path.join(save_path, f"{filename_prefix}-model.pt"))
 
             print("%s epoch:%d, bit:%d, dataset:%s, MAP:%.3f, Best MAP: %.3f" % (
                 config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))

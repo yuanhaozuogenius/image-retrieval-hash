@@ -30,7 +30,7 @@ def get_config():
         "net": AlexNet,
         # "net":ResNet,
         # "dataset": "cifar10",
-        "dataset": "cifar10-1",
+        "dataset": "cifar10",
         # "dataset": "cifar10-2",
         # "dataset": "coco",
         # "dataset": "mirflickr",
@@ -150,7 +150,7 @@ def train_val(config, bit):
 
             if mAP > Best_mAP:
                 Best_mAP = mAP
-                if "cifar10-1" == config["dataset"] and epoch > 29:
+                if "cifar10" == config["dataset"] and epoch > 29:
                     P, R = pr_curve(trn_binary.numpy(), tst_binary.numpy(), trn_label.numpy(), tst_label.numpy())
                     print(f'Precision Recall Curve data:\n"DSDH":[{P},{R}],')
                 if "save_path" in config:

@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import torch.utils.data as util_data
 from torchvision import transforms
@@ -7,10 +9,23 @@ import re
 from PIL import Image
 from tqdm import tqdm
 import torchvision.datasets as dsets
+import json
+import time
+from torch.utils.data import Dataset
+from typing import Dict, List, Tuple, Optional
+import torch.nn.functional as F
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+import matplotlib
+from sentence_transformers import SentenceTransformer
+from keybert import KeyBERT
+import spacy
 
 """
 根据数据集名称设置分类数、topK 评价范围和数据路径等信息。
 """
+
+
 def config_dataset(config):
     base_path = "./data/"  # 相对路径，基于项目根目录
 
@@ -37,6 +52,9 @@ def config_dataset(config):
         config["n_class"] = 20
 
     config["data_path"] = base_path + config["dataset"] + "/"
+    # 给通用数据集一个统一的图像根目录，默认为 data_path, 可以在外部通过 config["image_root"] 覆盖为绝对路径（如 D:/Datasets/...）
+    if "image_root" not in config:
+        config["image_root"] = config["data_path"]
 
     config["data"] = {
         "train_set": {"list_path": base_path + config["dataset"] + "/train.txt", "batch_size": config["batch_size"]},
@@ -47,7 +65,6 @@ def config_dataset(config):
     return config
 
 
-
 # 预定义的检索样本数量范围，用于绘制 PR 曲线
 draw_range = [1, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500, 6000, 6500, 7000, 7500, 8000, 8500,
               9000, 9500, 10000]
@@ -55,6 +72,8 @@ draw_range = [1, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000, 5500
 """
 根据查询集与数据库的特征和标签计算 Precision-Recall 曲线数据。
 """
+
+
 def pr_curve(rF, qF, rL, qL, draw_range=draw_range):
     #  https://blog.csdn.net/HackerTom/article/details/89425729
     n_query = qF.shape[0]
@@ -82,26 +101,48 @@ def pr_curve(rF, qF, rL, qL, draw_range=draw_range):
 """
 自定义图像数据集类，从 txt 列表中读取图像路径与多标签数据。
 """
+
+
 class ImageList(object):
 
     def __init__(self, data_path, image_list, transform):
-        self.imgs = [(data_path + val.split()[0], np.array([int(la) for la in val.split()[1:]])) for val in image_list]
+        self.imgs = []
         self.transform = transform
+
+        for raw in image_list:
+            line = raw.strip()
+            if not line:
+                continue
+
+            parts = line.split()  # 兼容空格或\t
+            rel = parts[0].replace("\\", "/")  # 统一斜杠
+            # ✅ 关键：绝对路径则直接用；否则与 data_path join
+            if os.path.isabs(rel):
+                full = rel
+            else:
+                full = os.path.normpath(os.path.join(data_path, rel))
+
+            # 多标签（空格分隔）→ int 向量；单标签也兼容
+            labels = np.array([int(x) for x in parts[1:]], dtype=np.int8)
+            self.imgs.append((full, labels))
 
     def __getitem__(self, index):
         path, target = self.imgs[index]
         img = Image.open(path).convert('RGB')
         img = self.transform(img)
         # 返回处理后的图像 tensor，标签（向量），样本索引（有时用于追踪或采样）
-        return img, target, index
+        return img, target, index, path
 
     def __len__(self):
         return len(self.imgs)
+
 
 """
 定义图像预处理操作，包括 Resize、Crop、ToTensor 和 Normalize。
 根据是 train_set 还是 test/database 设置不同的变换。
 """
+
+
 def image_transform(resize_size, crop_size, data_set):
     if data_set == "train_set":
         step = [transforms.RandomHorizontalFlip(), transforms.RandomCrop(crop_size)]
@@ -114,9 +155,12 @@ def image_transform(resize_size, crop_size, data_set):
                                                     std=[0.229, 0.224, 0.225])
                                ])
 
+
 """
 CIFAR10 数据集的自定义版本，将标签转为 one-hot，并进行 transform。
 """
+
+
 class MyCIFAR10(dsets.CIFAR10):
     def __getitem__(self, index):
         img, target = self.data[index], self.targets[index]
@@ -125,9 +169,12 @@ class MyCIFAR10(dsets.CIFAR10):
         target = np.eye(10, dtype=np.int8)[np.array(target)]
         return img, target, index
 
+
 """
 处理 CIFAR10 类数据集，按照固定比例划分 train、test 和 database 并返回 DataLoader。
 """
+
+
 def cifar_dataset(config):
     batch_size = config["batch_size"]
     cifar_dir = config["cifar10_dir"]
@@ -184,7 +231,7 @@ def cifar_dataset(config):
     if config["dataset"] == "cifar10":
         # test:1000, train:5000, database:54000
         pass
-    elif config["dataset"] == "cifar10-1":
+    elif config["dataset"] == "cifar10":
         # test:1000, train:5000, database:59000
         database_index = np.concatenate((train_index, database_index))
     elif config["dataset"] == "cifar10-2":
@@ -204,7 +251,8 @@ def cifar_dataset(config):
 
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,
                                                batch_size=batch_size,
-                                               shuffle=True,
+                                               # shuffle=True, 在txt文本中已经做了shuffle
+                                               shuffle=False,
                                                num_workers=4)
 
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
@@ -218,37 +266,352 @@ def cifar_dataset(config):
                                                   num_workers=4)
 
     return train_loader, test_loader, database_loader, \
-           train_index.shape[0], test_index.shape[0], database_index.shape[0]
+        train_index.shape[0], test_index.shape[0], database_index.shape[0]
+
 
 """
 根据 config 配置，加载非 CIFAR 的通用图像数据集并返回对应的 DataLoader。
 """
+
+
 def get_data(config):
-    if "cifar" in config["dataset"]:
-        return cifar_dataset(config)
+    # if "cifar" in config["dataset"]:
+    #     return cifar_dataset(config)
 
     dsets = {}
     dset_loaders = {}
     data_config = config["data"]
 
+    # 统一图像根目录（可为绝对路径；也能走相对路径）
+    image_root = config.get("image_root", config["data_path"])
+
+    # _image_root = config.get("cifar10_dir", config["data_path"])
     for data_set in ["train_set", "test", "database"]:
-        dsets[data_set] = ImageList(config["data_path"],
-                                    open(data_config[data_set]["list_path"]).readlines(),
-                                    transform=image_transform(config["resize_size"], config["crop_size"], data_set))
+        with open(data_config[data_set]["list_path"], "r") as f:
+            lines = f.readlines()
+        dsets[data_set] = ImageList(
+            image_root,
+            lines,
+            transform=image_transform(config["resize_size"], config["crop_size"], data_set)
+        )
         print(data_set, len(dsets[data_set]))
-        dset_loaders[data_set] = util_data.DataLoader(dsets[data_set],
-                                                      batch_size=data_config[data_set]["batch_size"],
-                                                      shuffle=True, num_workers=4)
+        dset_loaders[data_set] = util_data.DataLoader(
+            dsets[data_set],
+            batch_size=data_config[data_set]["batch_size"],
+            shuffle=False, num_workers=4  # 改为False，在txt文本中已经做了shuffle
+        )
 
     return dset_loaders["train_set"], dset_loaders["test"], dset_loaders["database"], \
-           len(dsets["train_set"]), len(dsets["test"]), len(dsets["database"])
+        len(dsets["train_set"]), len(dsets["test"]), len(dsets["database"])
+
+
+def load_class_captions(jsonl_path: str) -> Dict[int, List[str]]:
+    """
+    从 JSONL 缓存文件中加载每个类别的 captions。
+
+    • 文件结构：每行一个 JSON 对象，形如：
+    {"class": 3, "image_ids": [...], "captions": [{"text": "..."} , ...]}
+
+    • 返回值：{class_id: [caption_text1, caption_text2, ...]}
+      - 若文件不存在：自动创建空文件并返回空字典；
+      - 若文件存在但无有效数据：返回空字典；
+      - 存在且正常：读取
+    """
+    # 确保目录存在
+    jsonl_dir = os.path.dirname(jsonl_path)
+    os.makedirs(jsonl_dir, exist_ok=True)
+    # 若文件不存在：创建空文件 + 打印提示
+    if not os.path.isfile(jsonl_path):
+        open(jsonl_path, "a", encoding="utf-8").close()
+        print(f"[caption-cache] init empty cache at: {jsonl_path}")
+        return {}
+    # 存在且正常：读取
+    caps: Dict[int, List[str]] = {}
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+                c = obj.get("class")
+                arr = obj.get("captions")
+                if c is None or not isinstance(arr, list) or not arr:
+                    continue
+
+                for item in arr:
+                    if isinstance(item, dict):
+                        t = str(item.get("text", "")).strip()
+                        if t:
+                            caps.setdefault(int(c), []).append(t)
+            except Exception:
+                pass
+    return caps
+
+
+def append_class_captions(
+        jsonl_path: str,
+        cls_id: int,
+        image_ids: List[str],
+        captions_texts: List[str],
+        class_name: Optional[str] = None,
+) -> None:
+    """
+    结构：{"class": int, "image_ids": [..K..], "captions": [{"text": ...}, ...]}
+    """
+    os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
+
+    ids = [str(s).replace("\\", "/") for s in image_ids]
+    cap_texts = [{"text": str(t).strip()} for t in captions_texts]
+
+    rec = {
+        "class": int(cls_id),
+        "class_name": class_name or str(cls_id),
+        "image_ids": ids,
+        "captions": cap_texts,
+        # "time": time.strftime("%Y-%m-%d %H:%M:%S")
+    }
+    with open(jsonl_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    print(f"[caption-cache] wrote class {cls_id} → {len(cap_texts)} captions to: {jsonl_path}")
+
+
+# 1028 add
+def labels_to_text(ids):
+    """
+    把类别索引转成文本，若输入list(1...n)则返回全部文本，否则返回指定id的文本
+    """
+    lines = open("data/coco/class_names.txt", "r", encoding="utf-8").read().strip().split("\n")
+    names = [line.split()[1] for line in lines]
+    return [names[i] for i in ids]
+
+
+# 1028 add  计算类的个数
+def count_labels_nums():
+    path = "data/coco/class_names.txt"
+    with open(path, "r", encoding="utf-8") as f:
+        return sum(1 for _ in f)
+
+
+# 1028 add
+def get_class_bank(net, device, cache_path):
+    # 如果缓存目录有文件直接载入并返回
+    if os.path.isfile(cache_path):
+        class_bank = torch.load(cache_path, map_location=device)
+        print(f"[class_bank] load cache at: {cache_path}")
+        return class_bank if class_bank.device == device else class_bank.to(device)
+
+    # 否则用text_encoder重新生成并保存为class_bank.pt
+    num_classes = count_labels_nums()  # 类别数
+    class_texts = labels_to_text(list(range(num_classes)))  # 获取class names ['person', 'bicycle', ...]
+    print(f"[class_bank] classes number: {num_classes}  (first 5: {class_texts[:5]})")
+    t0 = time.time()
+    with torch.no_grad():
+        class_bank = net.text_encoder.encode(class_texts).to(device)  # [C,256]
+        print(f"[class_bank] encode time: {time.time() - t0:.3f}s, shape={tuple(class_bank.shape)}")
+    # 缓存到 CPU 文件，训练时再 to(device)
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    torch.save(class_bank.detach().cpu(), cache_path)
+    print(f"[class_bank] save class bank at: {cache_path}")
+    return class_bank
+
+
+def make_prompt_texts(prompt: str, class_names: List[str]) -> List[str]:
+    """
+    根据 prompt 模板和类名生成文本描述。
+    兼容三种情况：
+      - prompt 为空：直接返回类名；
+      - prompt 含 "{}" 或 "{name}"：按模板格式化；
+      - prompt 无占位符：前缀拼接。
+    示例：
+        make_prompt_texts("", ["cat","dog"])
+            → ["cat","dog"]
+        make_prompt_texts("a photo of", ["cat","dog"])
+            → ["a photo of cat","a photo of dog"]
+    """
+    if not prompt or not prompt.strip():
+        return class_names
+    p = prompt.strip()
+    if "{name}" in p:
+        return [p.format(name=n) for n in class_names]
+    if "{}" in p:
+        return [p.format(n) for n in class_names]
+    return [f"{p} {n}".strip() for n in class_names]
+
+
+# add 1105
+def extract_keywords(
+        text: str,
+        kw_model: KeyBERT,
+        top_n: int = 5,
+        min_ngram: int = 1,
+        max_ngram: int = 2
+) -> List[Tuple[str, float]]:
+    """
+    功能：对单条文本用 KeyBERT 抽取关键词短语。
+    参数：
+        text: 原始 caption 文本
+        kw_model: KeyBERT 实例
+        top_n: 返回的候选数
+        min_ngram/max_ngram: 关键词长度范围（词数）
+    返回：
+        列表[(关键词, 分数)]
+    说明：
+        - use_mmr=True 增强多样性；diversity 可按需调节。
+    """
+    return kw_model.extract_keywords(
+        text,
+        keyphrase_ngram_range=(min_ngram, max_ngram),
+        stop_words="english",
+        use_maxsum=False,
+        use_mmr=True,
+        diversity=0.5,
+        top_n=top_n
+    )
+
+# add 1105
+def pos_filter_terms(terms: List[str], nlp) -> List[str]:
+    """
+    功能：对候选词做词性过滤，仅保留名词/专有名词/形容词。
+    参数：
+        terms: 关键词列表（不含分数）
+        nlp: spaCy English pipeline
+    返回：
+        过滤后的关键词列表
+    """
+    kept = []
+    for t in terms:
+        doc = nlp(t)
+        # 对短语取所有 token 的 POS，只要包含 NOUN/PROPN/ADJ 即保留
+        if any(tok.pos_ in {"NOUN", "PROPN", "ADJ"} for tok in doc):
+            kept.append(t)
+    # 去重并保序
+    seen = set()
+    uniq = []
+    for x in kept:
+        if x not in seen:
+            uniq.append(x)
+            seen.add(x)
+    return uniq
+
+# 1105 add
+def load_filtered_captions_jsonl(jsonl_path: str):
+    """
+    从 filtered_captions.jsonl 读取结果，
+    返回结构：
+        { class_name: {"captions": [...], "filtered_captions": [[...], ...]} }
+    """
+    out = {}
+    if not os.path.isfile(jsonl_path):  # 没有则读到空返回
+        return out
+
+    #正常读
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line.strip())
+                cid = obj.get("class_id")
+                cls_name = str(obj.get("class_name", obj.get("class", "")))
+                caps = obj.get("captions")
+                filtered_caps = obj.get("filtered_captions", [])
+                out[cid] = {
+                    "class_name": cls_name,
+                    "captions": caps,
+                    "filtered_captions": filtered_caps,
+                }
+            except Exception:
+                pass
+    return out
+
+
+# 1105 add
+def get_filtered_captions(
+    caption_cache_path: str,
+    filtered_jsonl_path: str,
+    model_dir: str,
+    top_n: int = 4,
+    min_ngram: int = 1,
+    max_ngram: int = 2,
+    score_threshold: Optional[float] = None,
+):
+    """
+    功能：返回“过滤后的 captions（逐条一一对应的关键词列表）”，并按需写入/复用缓存：
+        - 若 filtered_jsonl_path 已存在：直接读取并返回 {class_name: List[List[str]]}
+        - 否则：使用既有 load_class_captions(caption_cache_path) 读取每类多条 caption，
+                对每条 caption 执行 KeyBERT(+可选 POS/+可选阈值)，
+                一类一行写入 filtered_jsonl_path：
+                {"class": name, "captions": [...], "filtered_captions": [[...], ...]}
+    参数：
+        caption_cache_path : 旧版 captions.jsonl（请使用已实现的 load_class_captions 读取）
+        filtered_jsonl_path: 目标输出 JSONL 路径（新版结构）
+        model_dir          : KeyBERT 底座（Sentence-Transformers 本地目录）
+        top_n/min_ngram/max_ngram/score_threshold: KeyBERT 控制项与分数阈值
+    返回：
+        {class_name: List[List[str]]}，与“每类 captions 的长度”一一对应
+    """
+    # A) 先尝试直接复用已存在的过滤结果
+    if os.path.isfile(filtered_jsonl_path):
+        cached = load_filtered_captions_jsonl(filtered_jsonl_path)
+        if cached:
+            print(f"[filtered-captions] load cache at: {filtered_jsonl_path} ({len(cached)} classes)")
+            return {c: cached[c]["filtered_captions"] for c in cached}
+
+    # B) 无缓存则生成：读取“每类多条 caption”
+    class2caps = load_class_captions(caption_cache_path)  # 外部已实现
+    class_ids = class2caps.keys()
+    if not class_ids:
+        print(f"[filtered-captions] WARN: no source captions found at: {caption_cache_path}")
+
+    # C) 模型就绪
+    kw_model = KeyBERT(model=model_dir)
+    nlp = spacy.load("en_core_web_sm")  # spacy英文语言模型，不支持中文处理，中文请移步：spacy-zh-core-web-sm等
+
+    # D) 逐类处理并一次性写入
+    os.makedirs(os.path.dirname(filtered_jsonl_path) or ".", exist_ok=True)
+    results = {}
+
+    with open(filtered_jsonl_path, "w", encoding="utf-8") as wf:
+        for c in class_ids:
+            caps: List[str] = [str(t).strip() for t in (class2caps.get(c) or []) if str(t).strip()]
+            if not caps:
+                caps = [f"class {c}"]
+
+            per_caption_terms: List[List[str]] = []
+            for cap in caps:
+                # KeyBERT 抽取
+                pairs = extract_keywords(
+                    cap, kw_model,
+                    top_n=top_n, min_ngram=min_ngram, max_ngram=max_ngram
+                )  # [(term, score)]
+                # 分数阈值过滤
+                terms = [w for (w, s) in pairs if (score_threshold is None or float(s) >= float(score_threshold))]
+                # POS 过滤（传 None 则跳过）
+                filtered_terms = pos_filter_terms(terms, nlp)
+                per_caption_terms.append(filtered_terms)
+
+            # 一类一行写入（captions 与 filtered_captions 等长、一一对应）
+            cls_name = labels_to_text([int(c)])[0]
+            rec = {
+                "class_id": c,
+                "class_name": cls_name,
+                "captions": caps,
+                "filtered_captions": per_caption_terms
+            }
+            wf.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            results[c] = per_caption_terms
+
+    print(f"[filtered-captions] wrote {len(results)} classes to: {filtered_jsonl_path}")
+    return results
 
 
 
-"""
-清理 save 目录中除最佳 mAP 文件外的所有模型/中间文件
-"""
 def clean_save_dir_keep_best(save_dir, dataset_name):
+    """
+    清理 save 目录中除最佳 mAP 文件外的所有模型/中间文件
+    """
+
     if not os.path.exists(save_dir):
         print(f"[clean_save_dir_keep_best] ⚠️ 目录不存在: {save_dir}，跳过清理。")
         return
@@ -287,21 +650,27 @@ def clean_save_dir_keep_best(save_dir, dataset_name):
 """
 通过模型提取图像的哈希特征向量（sign）与对应标签，并返回全部结果。
 """
+
+
 def compute_result(dataloader, net, device):
     bs, clses = [], []
     net.eval()
-    for img, cls, _ in tqdm(dataloader):
+    for img, cls, _, _ in tqdm(dataloader):
         clses.append(cls)
         bs.append((net(img.to(device))).data.cpu())
     return torch.cat(bs).sign(), torch.cat(clses)
 
+
 """
 计算两个哈希码矩阵之间的汉明距离。
 """
+
+
 def CalcHammingDist(B1, B2):
     q = B2.shape[1]
     distH = 0.5 * (q - np.dot(B1, B2.transpose()))
     return distH
+
 
 """
 计算 mAP（mean Average Precision）指标，衡量哈希检索质量。
@@ -323,6 +692,8 @@ topk	指定从数据库中检索的前 topk 个样本用于评估
 计算这些结果中 relevant 的平均精度；
 对所有查询样本做平均，得到最终 topkmap。
 """
+
+
 def CalcTopMap(rB, qB, retrievalL, queryL, topk):
     num_query = queryL.shape[0]
     topkmap = 0
@@ -343,3 +714,246 @@ def CalcTopMap(rB, qB, retrievalL, queryL, topk):
         topkmap = topkmap + topkmap_
     topkmap = topkmap / num_query
     return topkmap
+
+
+# =========================
+# 训练前一次性预生成类级 captions
+# =========================
+@torch.no_grad()
+def precompute_class_captions(
+        train_loader,
+        captioner,
+        caps_cache_path: str,
+        captions_num: int,
+        prompt: str = "",
+        device: torch.device = torch.device("cuda")
+):
+    """
+    功能：
+        - 每类生成若干 captions，并存入 jsonl。
+        - 若缓存文件已存在且非空，则直接读取并返回。
+    为每个类别最多采样 K 张图，按类批量 caption；写入 JSONL（{"class", "image_ids", "captions":[{"text":...}, ...]}）。
+    返回：class2caps: Dict[int, List[str]]，每类保留 K 条 captions 文本 (每个类随机挑 3个各生成 1条caption)。
+    """
+    # 如果文件存在且非空，跳过生成并直接读
+    if os.path.isfile(caps_cache_path) and os.path.getsize(caps_cache_path) > 0:
+        print(f"[caption-cache] found existing captions → skip generation")
+        return load_class_captions(caps_cache_path)
+    else:
+        print(f"[caption-cache] not found or empty → generating new captions...")
+
+        num_classes = count_labels_nums()  # 类别数
+        class2caps: Dict[int, List[str]] = {}
+
+        # 每类采样容器
+        """
+        picked_imgs = {
+        0: [img_tensor0_1, img_tensor0_2, img_tensor0_3],   # airplane 类的3张图
+        1: [img_tensor1_1, img_tensor1_2, img_tensor1_3],   # automobile 类的3张图
+        ...}
+
+        picked_abs = {
+        0: [".../airplane/001.png", ".../airplane/002.png", ".../airplane/003.png"],
+        1: [".../automobile/101.png", "..."],
+        ...}
+
+        先遍历整个 train_loader；
+        把属于每个类的图像（张量 + 路径）放进各自的 list；    
+        当数量达到 captions_num（比如 3）就停止往该类里放；    
+        所有类都达到 captions_num 后跳出循环；    
+        最后再对每个类的 list 统一送入 captioner.generate()。
+        """
+        picked_imgs = {c: [] for c in range(num_classes)}  # list[Tensor[C,H,W]] up to K 存放每个类别采样到的图像张量
+        picked_abs = {c: [] for c in range(num_classes)}  # 对应磁盘路径（用于写入 image_ids） 存放每个类别采样到的图像路径
+
+        # 仅为“缓存缺失”的类采样
+        need_classes = {c for c in range(num_classes) if c not in class2caps}
+        if not need_classes:
+            print(f"[caption-precompute] all {num_classes} classes already cached -> skip")
+            return class2caps
+        print(f"[caption-precompute] missing classes: {sorted(list(need_classes))} (captions_num={captions_num})")
+
+        # 遍历一次数据加载器，收集每类至多 K 张（用已带 transform 的张量，避免重复读盘/增广不一致）
+        for images, labels, ind, paths in train_loader:
+            images = images.to(device)
+            if isinstance(labels, np.ndarray):
+                labels = torch.from_numpy(labels)
+            # 单列标签 → 直接取值；one-hot/多标签 → argmax
+            if labels.ndim == 2 and labels.size(1) == 1:
+                y_idx = labels.view(-1).long().detach().cpu().tolist()
+            else:
+                y_idx = torch.argmax(labels, dim=1).long().detach().cpu().tolist()
+
+            for i, c in enumerate(y_idx):
+                if c not in need_classes:
+                    continue
+                if len(picked_imgs[c]) >= captions_num:
+                    continue
+                picked_imgs[c].append(images[i].detach().cpu())  # 暂存图像
+                picked_abs[c].append(str(paths[i]))  # 直接用 paths，避免索引错位
+
+            # 提前退出：都采满了就不再扫
+            if all((len(picked_imgs[c]) >= captions_num) or (c not in need_classes) for c in range(num_classes)):
+                break
+
+        # 对每个缺失类执行一次“按批 caption”
+        for c in sorted(list(need_classes)):
+            if len(picked_imgs[c]) == 0:
+                # 没采到图：回退——至少占位一个类名
+                class2caps.setdefault(c, [f"class {c}"])
+                continue
+
+            batch = torch.stack(picked_imgs[c], dim=0).to(device)  # [k,3,H,W]
+            t0 = time.time()
+            texts, _ = captioner.generate(batch, prompt=prompt, return_scores=False)
+            cost = time.time() - t0
+            cap_texts = [str(t).strip() for t in (texts or [])]
+
+            class_texts = labels_to_text(list(range(num_classes)))  # 获取class names ['person', 'bicycle', ...]
+
+            # 落盘：image_ids 使用原始路径（已是绝对路径），统一为正斜杠
+            image_ids = [p.replace("\\", "/") for p in picked_abs[c]]
+            append_class_captions(
+                caps_cache_path,
+                cls_id=int(c),
+                image_ids=image_ids,
+                captions_texts=cap_texts,  # 接口改名后的参数
+                class_name=class_texts[c],
+            )
+
+            pick_text = cap_texts[0] if cap_texts else f"class {c}"
+            class2caps[c] = cap_texts if cap_texts else [f"class {c}"]
+
+            print(f"[caption-precompute] class {c}: k={len(cap_texts)}, time={cost:.2f}s, text='{pick_text[:80]}'")
+
+        return class2caps
+
+
+
+# ====== t-SNE ===================================================
+# 从 dataloader 中提取用于可视化的一批连续特征（不取 sign），同时抽出标签做着色。
+
+def collect_features_for_tsne(dataloader,
+                              net,
+                              device,
+                              max_points: int = 4000):
+    """
+    从 dataloader 顺序收集样本，提取“连续特征”并返回（用于 t-SNE）。
+    约定：
+      - dataloader 的每个 batch 返回：(img, cls, _, _) 结构；
+      - net(img) 返回未二值化的连续向量（若你的 forward 返回线性输出，t-SNE 更稳；
+        我们这里额外做了一次 tanh，把范围规约到 (-1,1) 以抑制极端值）。
+    参数：
+      dataloader : torch.utils.data.DataLoader
+      net        : 已加载权重、处于 eval() 或 train() 任意状态的模型
+      device     : torch.device
+      max_points : 最多采多少个点来可视化（越大会越慢/越吃显存/内存）
+    返回：
+      features_np: (N, D) 的 numpy.ndarray  连续特征
+              N：最终采集到的样本数（不超过 max_points）；
+              D：模型输出的特征维度
+      labels_np  : (N,)   的 numpy.ndarray  每个样本的可视化标签（单标签的类别 id）
+    """
+    net.eval()
+    feats, labs = [], []
+    collected = 0
+
+    with torch.no_grad():
+        for img, cls, _, _ in dataloader:  # 与你的 ImageList __getitem__ 对齐
+            img = img.to(device, non_blocking=True)
+
+            # 1) 前向拿到连续特征（不做 sign）
+            #    你的 net.forward 返回的是哈希头线性输出；我们做 tanh 便于可视化的稳定性
+            u = net(img).tanh().detach().cpu()  # [B, bit]
+
+            # 2) 标签处理：如果是 one-hot / multi-hot，用 argmax 做一个可视化分组
+            if isinstance(cls, np.ndarray):
+                cls = torch.from_numpy(cls)  # 把class转换为张量tensor
+            cls_cpu = cls.detach().cpu()
+            if cls_cpu.ndim == 1:
+                lab = cls_cpu.long()  # 单标签，直接用
+            else:  # 用“随机挑一个正类”替代 argmax（且把全 0 行标成 -1 用灰色显示）
+                picked = []
+                for row in cls_cpu:  # row: [n_class]
+                    pos = torch.nonzero(row > 0).view(-1)
+                    if len(pos) == 0:
+                        picked.append(torch.tensor(-1))  # 全 0 → 无标签，用 -1 标记
+                    else:
+                        j = torch.randint(0, len(pos), (1,)).item()
+                        picked.append(torch.tensor(int(pos[j])))
+                lab = torch.stack(picked, dim=0).long()
+
+            feats.append(u)
+            labs.append(lab.cpu())
+            collected += u.size(0)
+
+            if collected >= max_points:
+                break
+
+    features_np = torch.cat(feats, dim=0)[:max_points].numpy()
+    labels_np = torch.cat(labs, dim=0)[:max_points].numpy()
+    return features_np, labels_np
+
+
+# - tsne_plot：把高维特征降到 2D 并保存散点图。
+def tsne_plot(features,
+              labels=None,
+              save_path: str = "tsne.png",
+              seed: int = 42,
+              perplexity: float = 30.0,
+              learning_rate: float = 200.0,
+              n_iter: int = 1000):
+    """
+    用 t-SNE 把高维特征降到二维，并保存散点图。
+    参数：
+      features     : numpy.ndarray, shape=(N, D)，高维输入特征
+      labels       : numpy.ndarray 或 None, shape=(N,)，用于着色的类别 id（可选）
+      save_path    : 输出图片路径（.png）
+      seed         : 随机种子（保证复现）
+      perplexity   : t-SNE 困惑度；类簇较多/数据更多时可以适当增大（但通常 5~50）
+      learning_rate: 学习率；默认 200，过小收敛慢，过大可能不稳定
+      n_iter       : 迭代步数；1000 对小中等规模通常足够
+    返回：
+      coords       : numpy.ndarray, shape=(N, 2)，二维坐标
+    """
+    matplotlib.use("Agg")  # 改成纯文件输出后端
+    # 1) 运行 t-SNE
+    tsne = TSNE(
+        n_components=2,
+        perplexity=float(perplexity),
+        learning_rate=float(learning_rate),
+        max_iter=int(n_iter),
+        init="pca",
+        random_state=int(seed),
+        verbose=0,
+        metric="euclidean"
+    )
+    coords = tsne.fit_transform(features)  # (N, 2)
+
+    # 2) 画散点
+    plt.figure(figsize=(6, 5), dpi=150)
+    if labels is None:
+        plt.scatter(coords[:, 0], coords[:, 1], s=4, alpha=0.7)
+        plt.title("t-SNE (no labels)")
+    else:
+        # 为了简单稳妥，直接用 matplotlib 的默认颜色循环；类别多也能自动回退
+        num_classes = int(np.max(labels)) + 1
+        for c in range(num_classes):
+            mask = (labels == c)
+            if not np.any(mask):
+                continue
+            plt.scatter(coords[mask, 0], coords[mask, 1], s=5, alpha=0.75, label=str(c))
+        # 类别太多时图例可能太挤，可按需注释掉下一行
+        if num_classes <= 20:
+            plt.legend(markerscale=2, frameon=True)
+
+        plt.title("t-SNE by class")
+
+    plt.xticks([])
+    plt.yticks([])
+    os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(save_path, bbox_inches="tight")
+    plt.close()
+    print(f"[t-SNE] saved to: {save_path}")
+    return coords

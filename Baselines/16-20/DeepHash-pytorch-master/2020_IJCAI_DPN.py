@@ -13,9 +13,9 @@ torch.multiprocessing.set_sharing_strategy('file_system')
 # DPN(IJCAI2020)
 # paper [Deep Polarized Network for Supervised Learning of Accurate Binary Hashing Codes](https://www.ijcai.org/Proceedings/2020/115)
 # [DPN] epoch:150, bit:48, dataset:imagenet, MAP:0.675, Best MAP: 0.688
-# [DPN] epoch:70, bit:48, dataset:cifar10-1, MAP:0.778, Best MAP: 0.787
+# [DPN] epoch:70, bit:48, dataset:cifar10, MAP:0.778, Best MAP: 0.787
 # [DPN] epoch:10, bit:48, dataset:nuswide_21, MAP:0.818, Best MAP: 0.818
-# [DPN-T] epoch:10, bit:48, dataset:cifar10-1, MAP:0.134, Best MAP: 0.134
+# [DPN-T] epoch:10, bit:48, dataset:cifar10, MAP:0.134, Best MAP: 0.134
 
 def get_config():
     config = {
@@ -32,7 +32,7 @@ def get_config():
         "batch_size": 32,
         "net": AlexNet,
         # "net": ResNet,
-        # "dataset": "cifar10-1",
+        # "dataset": "cifar10",
         # "dataset": "imagenet",
         # "dataset": "coco",
         "dataset": "nuswide_21",

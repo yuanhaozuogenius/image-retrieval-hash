@@ -32,8 +32,6 @@ class Engine(object):
             hash_model = HashModel(self.option)
         elif self.option.model_type == 'alexnet':
             hash_model = AlexNetFc(self.option)
-        elif self.option.model_type == 'conformer':
-            hash_model = Haformer(self.option)
         center_model = CenterModel(self.option)
         criterion = Loss(self.option, self.state)
         criterion_center = HashCenterLoss(self.option, self.state) if self.option.center_update else None
@@ -136,7 +134,7 @@ class Engine(object):
             'optimizer_center_dict': optimizer_center.state_dict(),
             'best_MAP': state['best_MAP']
         }
-        self.save_checkpoint(option, state, model_dict, is_best)
+        # self.save_checkpoint(option, state, model_dict, is_best)
 
     pass
 
@@ -230,7 +228,7 @@ class Engine(object):
                     }
                 else:
                     save_obj = {'output': hash_code.cpu(), 'target': target.cpu()}
-                pickle.dump(save_obj, file_path)
+                # pickle.dump(save_obj, file_path)
 
     def adjust_learning_rate(self, optimizer, epoch, type='hashNet'):
 
@@ -305,7 +303,7 @@ class Engine(object):
                 all_weight = centerWeight.data.cpu().float()
             else:
                 all_weight = torch.cat((all_weight, centerWeight.data.cpu().float()), 0)
-        np.save(file_path, all_weight.cpu().numpy())
+        # np.save(file_path, all_weight.cpu().numpy())
         return all_weight.cpu().numpy()
 
     def simplexPro(self, weightCenter_pre):
@@ -335,15 +333,15 @@ class Engine(object):
             if not os.path.exists(save_model_path):
                 os.makedirs(save_model_path)
         Logger.info('save model {filename}\n'.format(filename=filename))
-        torch.save(model_dict, filename)
+        # torch.save(model_dict, filename)
         if is_best:
             filename_best = 'model_best.pth.tar'
             if save_model_path is not None:
                 filename_best = os.path.join(save_model_path, filename_best)
-            shutil.copyfile(filename, filename_best)
+            # shutil.copyfile(filename, filename_best)
             if save_model_path is not None:
-                if state['filename_previous_best'] is not None and os.path.exists(state['filename_previous_best']):
-                    os.remove(state['filename_previous_best'])
+                # if state['filename_previous_best'] is not None and os.path.exists(state['filename_previous_best']):
+                #     os.remove(state['filename_previous_best'])
                 filename_best = os.path.join(save_model_path,
                                              'model_best_{score:.4f}.pth.tar'.format(score=model_dict['best_MAP']))
                 shutil.copyfile(filename, filename_best)
@@ -351,7 +349,7 @@ class Engine(object):
 
     def saveStatus(self, epoch, centerWeight_train, hashCenter_pre, MAP, result_all=None):
 
-        np.save('../result/' + self.option.data_name + '/centers.npy', hashCenter_pre.detach().cpu().numpy())
+        # np.save('../result/' + self.option.data_name + '/centers.npy', hashCenter_pre.detach().cpu().numpy())
         if MAP >= self.state['best_MAP']:
             if self.state['Database_hashpool_path'] is not None and os.path.exists(
                     self.state['Database_hashpool_path']):
@@ -368,24 +366,24 @@ class Engine(object):
             self.state['best_MAP'] = MAP
             self.state['best_epoch'] = epoch
             self.state['final_result'] = result_all
-            np.save(getWeightBestPath(self.option, self.state), centerWeight_train)
+            # np.save(getWeightBestPath(self.option, self.state), centerWeight_train)
             pass
         elif epoch >= self.option.epochs - 1:
-            np.save('../result/' + self.option.data_name + '/finalweight.npy', centerWeight_train)
+            # np.save('../result/' + self.option.data_name + '/finalweight.npy', centerWeight_train)
             pass
-        else:
-            if os.path.exists(getDatabaseHashPoolPath(self.option, self.state)):
-                os.remove(getDatabaseHashPoolPath(self.option, self.state))
-            if os.path.exists(getTestbaseHashPoolPath(self.option, self.state)):
-                os.remove(getTestbaseHashPoolPath(self.option, self.state))
-            if os.path.exists(getTrainbaseHashPoolPath(self.option, self.state)):
-                os.remove(getTrainbaseHashPoolPath(self.option, self.state))
+        # else:
+        #     if os.path.exists(getDatabaseHashPoolPath(self.option, self.state)):
+        #         os.remove(getDatabaseHashPoolPath(self.option, self.state))
+        #     if os.path.exists(getTestbaseHashPoolPath(self.option, self.state)):
+        #         os.remove(getTestbaseHashPoolPath(self.option, self.state))
+        #     if os.path.exists(getTrainbaseHashPoolPath(self.option, self.state)):
+        #         os.remove(getTrainbaseHashPoolPath(self.option, self.state))
         pass
 
     def resume(self, model_hash, model_center, optimizer_hash, optimizer_center):
         path_checkpoint = option.resume_path
         if option.resume and os.path.exists(path_checkpoint):
-            checkpoint = torch.load(path_checkpoint)
+            # checkpoint = torch.load(path_checkpoint)
             model_hash.load_state_dict(checkpoint['model_hash_dict'])
             model_center.load_state_dict(checkpoint['model_center_dict'])
             optimizer_hash.load_state_dict(checkpoint['optimizer_hash_dict'])

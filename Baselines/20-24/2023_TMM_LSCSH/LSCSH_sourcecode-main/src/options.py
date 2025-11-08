@@ -11,13 +11,13 @@ parser.add_argument('--resume_weight_path', default='', type=str, help='resume w
 # Training
 
 # parser.add_argument('--data_name', type=str, default='voc2012', help='voc or coco...')
-parser.add_argument('--data_name', type=str, default='cifar10-1', help='voc or coco or cifar10-1...')
-parser.add_argument('--data_path', type=str, default='/home/xx/Projects/faster_rcnn/data/', help='dataset path...')
+parser.add_argument('--data_name', type=str, default='coco', help='voc or coco or cifar10-1...')
+parser.add_argument('--data_path', type=str, default= r"D:\Datasets\coco2017", help='dataset path...')
 
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
 parser.add_argument('--lr_center', type=float, default=0.0001, help='learning rate for center update')
 
-parser.add_argument('--epochs', type=int, default=90, help='training epoch')
+parser.add_argument('--epochs', type=int, default=100, help='training epoch')
 parser.add_argument('--use_gpu', type=bool, default=True, help="use gpu ?")
 # parser.add_argument('--gpu_ids', nargs='+', type=int, default=None, help='gpu devices ids')
 parser.add_argument('--gpus', type=str, default="0", help="define gpu id")
@@ -33,7 +33,7 @@ parser.add_argument('--image_size', type=int, default=224, help='image size')
 parser.add_argument('--word2vec_file', type=str, default='/home/xx/Projects/Supervised_Baselines/LSCSH_sourcecode-main/data/voc2012/voc2012_bert768_word2vec.pkl',
                     help='word to vector file path')
 
-parser.add_argument('--num_class', type=int, default=20, help='The number of classes')
+parser.add_argument('--num_class', type=int, default=80, help='The number of classes')
 parser.add_argument('--workers', type=int, default=4, help='number of data loader workers.')
 parser.add_argument('--multi_lr', type=float, default=0.01, help='multiplier for learning rate')
 parser.add_argument('--lambda_Q', type=float, default=0.05, help='hyper-parameters for quantization loss')

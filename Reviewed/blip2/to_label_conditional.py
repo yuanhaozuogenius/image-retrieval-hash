@@ -11,19 +11,19 @@ https://huggingface.co/docs/transformers/model_doc/blip-2
 from PIL import Image
 from transformers import Blip2Processor, Blip2ForConditionalGeneration
 
-
 model_dir = r"D:\Models\blip2-opt-2.7b"
 
-processor = Blip2Processor.from_pretrained(model_dir, local_files_only=True)
+processor = Blip2Processor.from_pretrained(model_dir, local_files_only=True, use_fast=True)
 model = Blip2ForConditionalGeneration.from_pretrained(model_dir, local_files_only=True).to("cuda")
 
-# raw_image = Image.open("/Baselines/Reviewed/blip2/imgs/201707041538117hOYR7hOYR.jpg").convert('RGB')
-raw_image = Image.open("imgs/dogs.jpg").convert("RGB")
+# raw_image = Image.open("imgs/0007.jpg").convert("RGB")
+# raw_image = Image.open("imgs/57bdb5adff984eb5acf48fdda37eaf59.jpg").convert("RGB")
+raw_image = Image.open("imgs/000051.jpg").convert("RGB")
 # raw_image = Image.open("imgs/201707041538117hOYR7hOYR.jpg").convert("RGB")
 
 
 inputs = processor(raw_image, return_tensors="pt").to("cuda")
 
-generated_ids  = model.generate(**inputs)
+generated_ids = model.generate(**inputs)
 generated_text = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
 print(generated_text)

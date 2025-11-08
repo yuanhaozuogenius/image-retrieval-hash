@@ -1,11 +1,8 @@
 from scripts.train_CUB import *
-from scripts.utils import *
-
+import numpy as np
 
 if __name__ == '__main__':
     config = get_config()
-    print(config)
-
     best_result = 0
     for bit in config['bit_list']:
         config['order_seed'] = 80
@@ -23,12 +20,8 @@ if __name__ == '__main__':
         config["save_center"] = f"./results/{config['dataset']}/{config['remarks']}/ours_{bit}.npy"
         config["info"] = f"[{config['remarks']}]"
         config["loss_way"] = f"{config['remarks']}"
-        logger.add(f'logs/{config["dataset"]}/{config["info"]}/{bit}.log',
-                   rotation='500 MB',
-                   level='INFO',
-                   )
+        # logger.add(f'logs/{config["dataset"]}/{config["info"]}/{bit}.log',
+        #            rotation='500 MB',
+        #            level='INFO',
+        #            )
         train_val(config, bit, l)
-
-
-
-

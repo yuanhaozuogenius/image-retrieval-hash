@@ -27,7 +27,7 @@ from PIL import Image
 import time
 from BLIP2.to_vector import build_text_encoder
 from BLIP2.to_label import build_image_captioner
-import torch, gc
+import gc
 
 torch.multiprocessing.set_sharing_strategy('file_system')
 
@@ -40,19 +40,19 @@ def get_config():
     config = {
         "lambda": 0.0001,
         "optimizer": {"type": optim.RMSprop, "optim_params": {"lr": 1e-5, "weight_decay": 10 ** -5}},
-        "info": "[CSQ_BLIP_3]",
+        "info": "[CSQ_BLIP_4]",
         "resize_size": 224,
         "crop_size": 224,
         "batch_size": 64,
         "net": build_blip_net,
-        "dataset": "cifar10",
+        "dataset": "coco",
         "epoch": 120,
-        "test_map": 10,
+        "test_map": 40,
         "device": torch.device("cuda:0"),
         "bit_list": [64],
-        "save_path": "save/CSQ_BLIP_3",
-        "cifar10_dir": r"D:\Datasets\cifar10-image",  # 后续将实际数据路径设置在 image_root 中 方便统一修改
-        "image_root": r"D:\Datasets\cifar10-image",
+        "save_path": "save/CSQ_BLIP_4",
+        # "cifar10_dir": r"D:\Datasets\cifar10-image",  # 后续将实际数据路径设置在 image_root 中 方便统一修改
+        "image_root": r"D:\Datasets\coco2017",
         # —— 跨模态对齐控制 —— #
         # 对齐损失权重（0.5~2.0 之间微调）
         # 若发现 CSQ 很好但对齐很弱（Align 维持很小且总 mAP 没涨），试着加到 1.5–2.0；
@@ -66,8 +66,8 @@ def get_config():
         # 图生文
         "caption_num_beams": 1,  # 建议 ≥2 以保证 sequences_scores 可用
         "caption_max_new_tokens": 32,  # 句长上限（越大越慢）
-        "caption_sampling_k": 3,  # 固定采样数 K
-        # "caption_prompt": "a photo of a {}",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
+        "captions_num": 3,  # 固定采样数 K
+        # "caption_prompt": "a photo of a",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
 
         # 同近异远
         "contrast_temp": 0.07,  # InfoNCE 温度
@@ -83,27 +83,12 @@ def get_config():
     config = config_dataset(config)
 
     # 将 {dataset} 替换为真实数据集名
-    cap_path = config.get("caption_save_path", "./data/{dataset}/captions.jsonl")
-    config["caption_save_path"] = cap_path.replace("{dataset}", config["dataset"])
+    config["caption_save_path"] = config.get("caption_save_path").replace("{dataset}", config["dataset"])
     return config
 
 
 #  —— CIFAR-10 类名
 CIFAR10_LABELS = ["airplane", "automobile", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"]
-
-
-# =========================
-# 固定每类采样 K
-# =========================
-def _sample_fixed_k(cls2items: Dict[int, List], k: int, seed: int = 42):
-    random.seed(seed)
-    picked: Dict[int, List] = {}
-    for c, arr in cls2items.items():
-        if len(arr) <= k:
-            picked[c] = list(arr)
-        else:
-            picked[c] = random.sample(arr, k)
-    return picked
 
 
 class FeatureMapper(nn.Module):
@@ -170,8 +155,8 @@ class BLIP_HashWrapper(nn.Module):
     @torch.no_grad()
     def encode_image_to_256(self, image):
         # 冻结 BLIP，取 CLS 再做 L2 归一化
-        vision_embeds = self.model.visual_encoder(image)
-        v256 = self.model.vision_proj(vision_embeds[:, 0, :])  # [B, 256]
+        vision_embeds = self.model.visual_encoder(image)   # 经过Transformer(viT)编码
+        v256 = self.model.vision_proj(vision_embeds[:, 0, :])  # 第0个位置——>CLS 代表该图的特征 [B, 256]
         v256 = F.normalize(v256, dim=-1)
         return v256
 
@@ -232,13 +217,13 @@ class CSQLoss(torch.nn.Module):
         return hash_targets
 
 
-# —— 对齐损失（发生在 img_adapter(v256) ↔ t256）—— #
+# —— 对齐损失（发生在 img_adapter(v256) ↔ t_adapt）—— #
 class AlignmentLoss(nn.Module):
     def __init__(self, mode="mse"):
         super().__init__()
         self.mode = mode
         self.mse = nn.MSELoss()
-
+    # forward写法比较方便后续实例化和取，v_adapt = img_adapter(v256)
     def forward(self, v_adapt, t_adapt):
         v_adapt = F.normalize(v_adapt, dim=-1)
         t_adapt = F.normalize(t_adapt, dim=-1)
@@ -251,98 +236,6 @@ class AlignmentLoss(nn.Module):
             raise ValueError("Unsupported align mode")
 
 
-# =========================
-# 训练前一次性预生成类级 captions
-# =========================
-@torch.no_grad()
-def precompute_class_captions(
-        train_loader,
-        captioner,
-        cache_path: str,
-        K: int,
-        prompt: str = "",
-        device: torch.device = torch.device("cuda")
-):
-    """
-    为每个类别最多采样 K 张图，按类批量 caption；写入 JSONL（{"class", "image_ids", "captions":[{"text":...}, ...]}）。
-    返回：class2caps: Dict[int, List[str]]，每类保留 K 条 captions 文本（按出现顺序）。
-    """
-    ds: ImageList = train_loader.dataset
-    n_class: int = getattr(ds, "n_class", None) or getattr(ds, "n_classes", None) or 0
-    if n_class <= 0:
-        # 若数据集未标注类别数，则从 list 中推断（保守写法）
-        n_class = max([int(lab) for _, lab in ds.imgs]) + 1
-
-    # 已有缓存：尽可能复用（现在 load 返回 Dict[int, List[str]]）
-    seen: Dict[int, List[str]] = load_class_captions(cache_path)
-    class2caps: Dict[int, List[str]] = dict(seen)  # 拷贝一份作为返回容器
-
-    # 每类采样容器
-    picked_imgs = {c: [] for c in range(n_class)}  # list[Tensor[C,H,W]] up to K
-    picked_abs = {c: [] for c in range(n_class)}  # 对应磁盘路径（用于写入 image_ids）
-
-    # 仅为“缓存缺失”的类采样
-    need_classes = {c for c in range(n_class) if c not in class2caps}
-    if not need_classes:
-        print(f"[caption-precompute] all {n_class} classes already cached -> skip")
-        return class2caps
-
-    print(f"[caption-precompute] missing classes: {sorted(list(need_classes))} (K={K})")
-
-    # 遍历一次数据加载器，收集每类至多 K 张（用已带 transform 的张量，避免重复读盘/增广不一致）
-    for images, labels, ind, paths in train_loader:
-        images = images.to(device)
-        if isinstance(labels, np.ndarray):
-            labels = torch.from_numpy(labels)
-        # 单列标签 → 直接取值；one-hot/多标签 → argmax
-        if labels.ndim == 2 and labels.size(1) == 1:
-            y_idx = labels.view(-1).long().detach().cpu().tolist()
-        else:
-            y_idx = torch.argmax(labels, dim=1).long().detach().cpu().tolist()
-
-        for i, c in enumerate(y_idx):
-            if c not in need_classes:
-                continue
-            if len(picked_imgs[c]) >= K:
-                continue
-            picked_imgs[c].append(images[i].detach().cpu())  # 暂存图像
-            picked_abs[c].append(str(paths[i]))  # 直接用 paths，避免索引错位
-
-        # 提前退出：都采满了就不再扫
-        if all((len(picked_imgs[c]) >= K) or (c not in need_classes) for c in range(n_class)):
-            break
-
-    # 对每个缺失类执行一次“按批 caption”
-    for c in sorted(list(need_classes)):
-        if len(picked_imgs[c]) == 0:
-            # 没采到图：回退——至少占位一个类名
-            class2caps.setdefault(c, [f"class {c}"])
-            continue
-
-        batch = torch.stack(picked_imgs[c], dim=0).to(device)  # [k,3,H,W]
-        t0 = time.time()
-        texts, _ = captioner.generate(batch, prompt=prompt, return_scores=False)
-        cost = time.time() - t0
-        cap_texts = [str(t).strip() for t in (texts or [])]
-
-        cls_name = CIFAR10_LABELS[c] if 0 <= c < len(CIFAR10_LABELS) else str(c)
-
-        # 落盘：image_ids 使用原始路径（已是绝对路径），统一为正斜杠
-        image_ids = [p.replace("\\", "/") for p in picked_abs[c]]
-        append_class_captions(
-            cache_path,
-            cls_id=int(c),
-            image_ids=image_ids,
-            captions_texts=cap_texts,  # 接口改名后的参数
-            class_name=cls_name,
-        )
-
-        pick_text = cap_texts[0] if cap_texts else f"class {c}"
-        class2caps[c] = pick_text
-        print(f"[caption-precompute] class {c}: k={len(cap_texts)}, time={cost:.2f}s, text='{pick_text[:80]}'")
-
-    return class2caps
-
 
 def train_val(config, bit):
     device = config["device"]
@@ -353,30 +246,31 @@ def train_val(config, bit):
     captioner = build_image_captioner(
         device="cuda" if torch.cuda.is_available() else "cpu",
         model_dir=config.get("blip_dir", r"D:\Models\blip2-opt-2.7b"),
-        num_beams=int(config.get("caption_num_beams", 3)),
+        num_beams=int(config.get("caption_num_beams", 1)),
         max_new_tokens=int(config.get("caption_max_new_tokens", 32))
     )
 
     # ———— Caption 缓存路径与初始化 ———— #
     # 从 JSONL 缓存加载按类缓存的“唯一 caption”（若不存在则为空）
-    cache_path = config.get("caption_save_path")
-    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-    if not os.path.isfile(cache_path):
-        with open(cache_path, "w", encoding="utf-8") as f:
+    caps_cache_path = config.get("caption_save_path")
+    os.makedirs(os.path.dirname(caps_cache_path), exist_ok=True)
+    if not os.path.isfile(caps_cache_path):
+        with open(caps_cache_path, "w", encoding="utf-8") as f:
             pass
-        print(f"[caption-cache] init empty cache at: {cache_path}")
+        print(f"[caption-cache] init empty cache at: {caps_cache_path}")
     else:
-        print(f"[caption-cache] found cache: {cache_path}")
+        print(f"[caption-cache] found cache: {caps_cache_path}")
 
     # ———— 训练前一次性预生成类级 captions ———— #
-    K = int(config.get("caption_k", 3))
+    captions_num = int(config.get("captions_num", 3))
     prompt = config.get("caption_prompt", "")
+
     # 在训练前先遍历一遍所有数据
     class2caps = precompute_class_captions(
         train_loader=train_loader,
         captioner=captioner,
-        cache_path=cache_path,
-        K=K,
+        caps_cache_path=caps_cache_path,
+        captions_num=captions_num,
         prompt=prompt,
         device=device
     )
@@ -388,6 +282,7 @@ def train_val(config, bit):
     gc.collect()  # 清理已经没有引用的对象
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
     # 清空缓存后再实例化net
     net = config["net"](bit,
                         blip_ckpt=config.get("blip_ckpt", "./models/model_base.pth"),
@@ -397,12 +292,8 @@ def train_val(config, bit):
                         blip_dir=config.get("blip_dir", config.get("model_dir", r"D:\Models\blip2-opt-2.7b")),
                         ).to(device)
 
-    # 若仍有缺失，补占位（稳妥）
-    n_class = config.get("n_class", 0) or 10
-    for c in range(n_class):
-        if c not in class2caps or not class2caps[c]:
-            class2caps[c] = f"class {c}"
-    # print(f"[caption-cache] loaded {len(class2cap)} classes from {cache_path}")
+    n_class = config.get("n_class") or count_labels_nums()
+    # print(f"[caption-cache] loaded {len(class2cap)} classes from {caps_cache_path}")
 
     # ========= 构建 Prompt/Caption 两个文本库（bank） =========
     # 1) 类名获取
@@ -411,7 +302,7 @@ def train_val(config, bit):
         if str(config.get("dataset", "")).lower() in ["cifar10", "cifar-10"]:
             class_names = CIFAR10_LABELS
         else:
-            class_names = [f"class {c}" for c in range(n_class)]
+            class_names = labels_to_text(list(range(n_class)))  # 获取class names ['person', 'bicycle', ...]
 
     # 2) Prompt bank（正样本锚等于类名或者类名直接拼接而成的prompts）：每类 1 条 prompt
     prompt_texts = make_prompt_texts(prompt, class_names)
@@ -421,15 +312,20 @@ def train_val(config, bit):
 
     # 3) Caption bank（负样本全集，逐条；并记录其类ID以便屏蔽本类）
     neg_texts, neg_cls_ids = [], []
+
+
+    # 将“每条 caption 的关键词列表”拼成一句短语（"; " 连接），逐条写入负样本库
     for c in range(n_class):
-        caps = class2caps.get(c, [])
-        for t in caps:
-            if isinstance(t, str) and t.strip(): # 当 t 是字符串并且不全是空格时
-                neg_texts.append(t.strip())
-                neg_cls_ids.append(c)
+        term_lists = class2caps.get(c, None)
+        if term_lists and len(term_lists) > 0:
+            for text in term_lists:
+                if text:
+                    neg_texts.append(text)
+                    neg_cls_ids.append(c)
 
     with torch.no_grad():
         if len(neg_texts) > 0:
+            # caption_bank : captions转换的张量。用于构建负样本对和t256
             caption_bank = net.text_encoder.encode(neg_texts).to(device)  # [Nneg, D]
             caption_bank = F.normalize(caption_bank, dim=-1)
             # 把列表转为张量,后续才能在GPU 上做矩阵比较
@@ -437,19 +333,22 @@ def train_val(config, bit):
             # 如果相同，就要把这些 caption 当作“本类”并屏蔽掉（不作为负样本）
             neg_cls_ids = torch.tensor(neg_cls_ids, device=device, dtype=torch.long)  # [Nneg]
 
-    tau = float(config.get("contrast_temp", 0.07))
+    tau = float(config.get("contrast_temp", 0.07))  # 可学习的温度参数，用于控制概率分布的尖锐程度
     contrast_weight = float(config.get("contrast_weight", 1.0))
 
     # 优化器（分组：fc1 / hash head / fc2）
     base_optim = config["optimizer"]
     base_lr = base_optim["optim_params"].get("lr", 1e-5)
     ta_mult = config.get("text_adapter_lr_mult", 0.5)
+    # 只找params中的最优解
     params = [
         {"params": net.img_adapter.parameters(), "lr": base_lr},  # fc1
         {"params": net.mapper.parameters(), "lr": base_lr},  # hash head
         {"params": net.text_adapter.parameters(), "lr": base_lr * ta_mult},  # ★ fc2 稍低 lr 更稳
     ]
     optimizer = base_optim["type"](params, **{k: v for k, v in base_optim["optim_params"].items() if k != "lr"})
+
+    # 初始化loss对象
     csq_criterion = CSQLoss(config, bit)
     align_criterion = AlignmentLoss(mode=config.get("align_mode", "mse"))
     align_weight = float(config.get("align_weight", 1.0))
@@ -472,8 +371,6 @@ def train_val(config, bit):
         for images, labels, ind, paths in train_loader:
 
             # ====== 进入一个 batch ======
-
-
             # —— 搬到 GPU —— #
             images = images.to(device, non_blocking=True)
             if isinstance(labels, np.ndarray):
@@ -483,18 +380,18 @@ def train_val(config, bit):
 
             # —— 文本侧：从 prompt_bank 取正样本锚 —— #
             with torch.no_grad():
-                if labels.ndim == 2 and labels.size(1) == 1:
+                if labels.ndim == 2 and labels.size(1) == 1: # 多标签
                     y_idx = labels.view(-1).long()
-                else:
+                else:           # 非多标签（单标签）
                     y_idx = labels.argmax(dim=1).long()
 
                 # 调试更稳：用 CPU 做索引再搬回 GPU，避免 GPU 高级索引隐式同步
                 y_idx_cpu = y_idx.detach().cpu()
-                t256 = prompt_bank[y_idx_cpu].to(device)
+                t256 = caption_bank[y_idx_cpu].to(device)  # 从caption_bank取出y_index对应批的tensor
+
             if torch.cuda.is_available(): torch.cuda.synchronize()
 
-
-            # —— 清梯度（更轻量） —— #
+            # —— 清梯度，防止梯度累计—— #
             optimizer.zero_grad(set_to_none=True)
 
             # —— 视觉侧（冻结 BLIP 编码到 256） —— #
@@ -504,6 +401,7 @@ def train_val(config, bit):
 
 
             # —— 适配层与哈希头 —— #
+
             v_adapt = net.img_adapter(v256)  # [B,256]
             t_adapt = net.text_adapter(t256)  # [B,256]
             if torch.cuda.is_available(): torch.cuda.synchronize()
@@ -514,40 +412,49 @@ def train_val(config, bit):
 
 
             # —— 损失 —— #
+            # fc1 fc2 的结果做对齐，而不是fc1 fc2网络结构对齐
             align_loss = align_criterion(v_adapt, t_adapt)
+            # 让t_adapt和 t256的乘积最小——>最相似
             id_loss = F.mse_loss(F.normalize(t_adapt, dim=-1), t256)
             csq_loss = csq_criterion(u, labels, ind, config)
 
-            # 对比损失（正：prompt；负：caption_pool）
-            img_feats = F.normalize(v_adapt, dim=-1)  # [B,256]
-            pos_vecs = t256  # [B,256]
-            pos_logits = (img_feats * pos_vecs).sum(dim=1, keepdim=True) / tau
+            img_feats = F.normalize(v_adapt, dim=-1)  # [B,256] 表示当前要查询的目标图像特征
+
+            #   正样本对及正样本对的对比logits
+            pos_vecs = prompt_bank[y_idx]
+            pos_logits = (img_feats * pos_vecs).sum(dim=1, keepdim=True) / tau   # [B,1] 图像与正样本相似度
 
             if caption_bank.size(0) > 0:
-                # 可选：如太慢，这里可以开启负样本子采样
-                # Nkeep = min(1024, caption_bank.size(0))
-                # perm  = torch.randperm(caption_bank.size(0), device=device)[:Nkeep]
-                # bank, neg_ids = caption_bank.index_select(0, perm), neg_cls_ids.index_select(0, perm)
+                # caption_bank数据集所有类的编码结果  neg_cls_ids 与caption_bank对应的类别 ID 向量
                 bank, neg_ids = caption_bank, neg_cls_ids
 
-                neg_logits_all = (img_feats @ bank.t()) / tau  # [B, Nneg]
+                # 计算图像-负样本对文本的 相似度矩阵 S = v @ t^T / τ
+                neg_logits = (img_feats @ bank.t()) / tau
+                # 屏蔽正样本（即同类 caption）防止其被当作负样本
+                # mask[b, j] = True 表示: 若某条 caption 属于当前图像的同类（neg_ids == y_idx），
+                # 则将其相似度置为极小值-1e4，相当于排除本类 caption，防止“伪负样本”干扰。
                 mask = (neg_ids.unsqueeze(0) == y_idx.unsqueeze(1))  # [B, Nneg]
-                neg_logits_all = neg_logits_all.masked_fill(mask, -1e4)
-                logits = torch.cat([pos_logits, neg_logits_all], dim=1)  # [B, 1+Nneg]
+                neg_logits = neg_logits.masked_fill(mask, -1e4)
+
+                # 拼接出最终对比logits
+                logits = torch.cat([pos_logits, neg_logits], dim=1)
+
+                # 每个样本的正确类别在 logits 第 0 列
                 targets = torch.zeros(logits.size(0), dtype=torch.long, device=device)
-                contrast_loss = F.cross_entropy(logits, targets)
+
+                # 图像→文本 对比损失 (单向 InfoNCE)
+                contrast_loss  = F.cross_entropy(logits, targets)
             else:
+                # 若 caption_bank<=0 为空（例如首次运行或无 caption）, 不计算对比损失
                 contrast_loss = torch.tensor(0.0, device=device)
 
             if torch.cuda.is_available(): torch.cuda.synchronize()
 
-
             total_loss = csq_loss + align_weight * align_loss + beta * id_loss + contrast_weight * contrast_loss
-
 
             total_loss.backward()
 
-
+            # 优化器：获取最优解
             optimizer.step()
             if torch.cuda.is_available(): torch.cuda.synchronize()
 
@@ -571,7 +478,7 @@ def train_val(config, bit):
         lr = optimizer.param_groups[0].get("lr", None)
         lr_str = f"{lr:.1e}" if lr is not None else "NA"
         print(f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
-              f"bit:{bit}, dataset:{config['dataset']}, "
+              f"bit:{bit}, dataset:{config['dataset']}, lr:{lr_str}, "
               f"loss:{train_loss_avg:.3f} "
               f"(csq:{csq_loss_avg:.3f}, align:{align_loss_avg:.3f}, id:{id_loss_avg:.3f}, "
               f"contrast:{contrast_loss_avg:.3f}, α={align_weight:.2f}, β={beta:.2f}, λ={contrast_weight:.2f}, τ={tau:.2f}, "

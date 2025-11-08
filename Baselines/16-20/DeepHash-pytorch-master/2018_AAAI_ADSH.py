@@ -34,7 +34,7 @@ def get_config():
         "crop_size": 224,
         "batch_size": 64,
         "net": AlexNet,
-        "dataset": "cifar10-1",
+        "dataset": "cifar10",
         # "dataset": "nuswide_21",
         "save_path": "save/ADSH",
         # "device":torch.device("cpu"),

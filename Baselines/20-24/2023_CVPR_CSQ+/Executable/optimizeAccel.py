@@ -12,7 +12,7 @@ import json
 import scipy.sparse.linalg as linalg
 from scipy.sparse import csc_matrix
 import copy
-from numba import jit
+# from numba import jit
 import time
 # 汉明距离转内积：<> = bit-2d
 # 内积转汉明距离：d = 1/2(bit-<>)
@@ -80,27 +80,27 @@ def init_hash(n_class, bit):
     hash_centers = np.sign(hash_centers)
     return hash_centers
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def cal_Cx(x, H):
     return np.dot(H, x)
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def cal_M(H):
     return np.dot(H.T, H)/H.shape[0]
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def cal_b(H):
     """
     求H中所有哈希中心的均值
     """
     return np.dot(np.ones(H.shape[0], dtype=np.float64), H) / H.shape[0]
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def cal_one_hamm(b, H):
     temp = 0.5 * (b.shape[0] - np.dot(H, b))
     return temp.mean() + temp.min()-temp.var(), temp.min()
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def cal_hamm(H):
     dist = []
     for i in range(H.shape[0]):
@@ -112,7 +112,7 @@ def cal_hamm(H):
     # print(f"mean is {dist.mean()}; min is {dist.min()}; var is {dist.var()}")
     return st, dist.mean(), dist.min(), dist.var(), dist.max()
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def in_range(z1, z2, z3, bit):
     """
     截断误差
@@ -134,7 +134,7 @@ def in_range(z1, z2, z3, bit):
         return flag
     return flag
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def get_min(b, H):
     temp = []
     for i in range(H.shape[0]):
@@ -144,7 +144,7 @@ def get_min(b, H):
     # print(temp.min())
     return temp.min()
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def Lp_box_one(b, H, d_max, n_class, bit, rho, gamma, error):
     """
     要优化的哈希中心为x
@@ -233,7 +233,7 @@ def Lp_box_one(b, H, d_max, n_class, bit, rho, gamma, error):
     # best_B = np.sign(b)
     return best_B, H
 
-@jit(nopython=True)
+# @jit(nopython=True)
 def Lp_box(B, best_B, n_class, d_max, bit, rho, gamma, error, best_st):
     count = 0
     for oo in range(50):
@@ -254,7 +254,7 @@ def Lp_box(B, best_B, n_class, d_max, bit, rho, gamma, error, best_st):
 
 if __name__ == '__main__':
     for bit in [64]:
-        n_class = 10  # CIFAR-10
+        n_class = 80
         initWithCSQ = True
         if bit == 48:
             initWithCSQ = False
@@ -291,9 +291,7 @@ if __name__ == '__main__':
         print(time_string)
         ev_st, ev_mean, ev_min, ev_var, ev_max = cal_hamm(best_B)
         print(f"ev_st is {ev_st}, ev_min is {str(ev_min)}, ev_mean is {ev_mean}, ev_var is {ev_var}, ev_max is {str(ev_max)}")
-        os.makedirs('centerswithoutVar', exist_ok=True)
         np.save(f'./centerswithoutVar/CSQ_init_{initWithCSQ}_{n_class}_{bit}.npy', best_B)
-
 
     
             

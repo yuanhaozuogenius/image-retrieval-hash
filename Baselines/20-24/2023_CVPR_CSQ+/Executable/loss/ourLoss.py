@@ -1,131 +1,55 @@
-import os
-from math import gamma
-# from numpy.lib.function_base import select
 import torch
-import torch.nn as NN
-from scipy.linalg import hadamard, eig
-import numpy as np
-import random
-# from numpy import *
-from scipy.special import comb
-from loguru import logger
-import pdb
-import itertools
-import copy
-from tqdm import tqdm
+import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 
-class OurLoss(NN.Module):
-    def __init__(self, config, bit, l):
-        """
-        :param config: in paper, the hyper-parameter lambda is chose 0.0001
-        :param bit:
-        """
-        super(OurLoss, self).__init__()
+class OurLoss(nn.Module):
+    def __init__(self, config, bit):
+        super().__init__()
         self.config = config
         self.bit = bit
-        self.alpha_pos, self.alpha_neg, self.beta_neg, self.d_min, self.d_max = self.get_margin()
-        self.hash_center = self.generate_center(bit, config['n_class'], l)
-        # 自动创建保存路径
-        os.makedirs(os.path.dirname(config['save_center']), exist_ok=True)
-        np.save(config['save_center'], self.hash_center.cpu().numpy())
-        self.BCEloss = torch.nn.BCELoss().cuda()
-        self.Y = torch.randn(self.config['num_train'], self.config['n_class']).float().cuda()
-        self.U = torch.randn(config['num_train'], bit).cuda()
-        self.label_center = torch.from_numpy(
-            np.eye(config['n_class'], dtype=np.float32)[np.array([i for i in range(config['n_class'])])]).cuda()
-        self.tanh = NN.Tanh().cuda()
+        # 读取预先生成好的 hash center [n_class, bit]
+        hash_centers = np.load(config['center_path'])  # shape [num_stage, n_class, bit]
+        self.hash_center = torch.from_numpy(hash_centers).float().cuda()
+        self.label_center = torch.eye(config['n_class']).float().cuda()      # one-hot 类别向量
 
-    def forward(self, u1, u2, y, ind, k=0):
-        self.U[ind, :] = u2.data
-        self.Y[ind, :] = y
-        return self.cos_pair(u1, y, ind, k)
+    def forward(self, u, y):
+        """
+        u: [batch, bit] 经过ResNet + tanh输出的连续哈希码
+        y: [batch, n_class] one-hot标签
+        """
+        # -------------------------
+        # 1. L_C: center similarity loss
+        # -------------------------
+        u_norm = F.normalize(u, p=2, dim=1)
+        centers_norm = F.normalize(self.hash_center, p=2, dim=1)
+        cos_sim = torch.matmul(u_norm, centers_norm.t())          # [batch, n_class]
+        cos_sim = (self.bit ** 0.5) * cos_sim                     # scaled cosine
+        log_prob = F.log_softmax(cos_sim, dim=1)
+        L_C = -(y * log_prob).sum(dim=1).mean()                   # cross-entropy style
 
-    
-    def cos_pair(self, u, y, ind, k):
-        if k < self.config['epoch_change']:
-            pair_loss = 0
+        # -------------------------
+        # 2. L_P: pairwise similarity loss (同类样本内积越大越好)
+        # -------------------------
+        label_sim = torch.matmul(y, y.t())                        # [batch, batch], 1表示同类
+        u_inner = torch.matmul(u, u.t())                          # [batch, batch]
+        L_P_matrix = torch.log1p(torch.exp((self.bit - u_inner) / (2 * self.bit)))
+        # 只考虑同类对
+        mask = (label_sim > 0).float()
+        if mask.sum() > 0:
+            L_P = (L_P_matrix * mask).sum() / mask.sum()
         else:
-            last_u = self.U
-            last_y = self.Y
-            pair_loss = self.moco_pairloss(u, y, last_u, last_y, ind)
-        cos_loss = self.cos_eps_loss(u, y, ind)
-        Q_loss = (u.abs() - 1).pow(2).mean()
-        
-        loss = cos_loss + self.config['beta'] * pair_loss + self.config['lambda'] * Q_loss
-        return loss, cos_loss, pair_loss
+            L_P = torch.tensor(0.0).cuda()
 
-    def moco_pairloss(self, u, y, last_u, last_y, ind):
-        u = F.normalize(u)
-        last_u = F.normalize(last_u)
-        label_sim = ((y @ y.t()) > 0).float()
-        cos_sim = u @ u.t()
-        last_sim = ((y @ last_y.t()) > 0).float()
-        last_cos = u @ last_u.t()
+        # -------------------------
+        # 3. L_Q: quantization loss
+        # -------------------------
+        # L_Q = ((u.abs() - 1.0)**2).mean()
+        L_Q = (u.abs() - 1.0).abs().mean()
 
-        loss = torch.sum(last_sim * torch.log(1 + torch.exp(1/2 *(1 - last_cos))))/torch.sum(last_sim) # only the positive pair 
-        return loss
-    
-    def cos_eps_loss(self, u, y, ind):
-        K = self.bit
-        m = 0.0
-        l = 1 - 2 * self.d_max / K
-        u_norm = F.normalize(u)
-        centers_norm = F.normalize(self.hash_center)
-        cos_sim = torch.matmul(u_norm, torch.transpose(centers_norm, 0, 1)) # batch x n_class
-        s = (y @ self.label_center.t()).float() # batch x n_class
-        cos_sim = K ** 0.5 * cos_sim
-        p = torch.softmax(cos_sim, dim=1)
-        loss = s * torch.log(p) + (1-s) * torch.log(1-p)
-        loss = torch.mean(loss)
-        return -loss
-            
-    def get_margin(self):
-        # 1. 计算d_min
-        L = self.bit
-        n_class = self.config['n_class']
-        right = (2 ** L) / n_class
-        d_min = 0
-        d_max = 0
-        for j in range(2 * L + 4):
-            dim = j
-            sum_1 = 0
-            sum_2 = 0
-            for i in range((dim - 1) // 2 + 1):
-                sum_1 += comb(L, i)
-            for i in range((dim) // 2 + 1):
-                sum_2 += comb(L, i)
-            if sum_1 <= right and sum_2 > right:
-                d_min = dim
-        for i in range(2 * L + 4):
-            dim = i
-            sum_1 = 0
-            sum_2 = 0
-            for j in range(dim):
-                sum_1 += comb(L, j)
-            for j in range(dim - 1):
-                sum_2 += comb(L, j)
-            if sum_1 >= right and sum_2 < right:
-                d_max = dim
-        # 2. 计算alpha_neg和alpha_pos
-        alpha_neg = L - 2 * d_max
-        beta_neg = L - 2 * d_min
-        alpha_pos = L
-        return alpha_pos, alpha_neg, beta_neg, d_min, d_max
+        # -------------------------
+        # 总损失
+        # -------------------------
+        loss = L_C +self.config['beta'] * L_P + self.config['lambda'] * L_Q
 
-    def generate_center(self, bit, n_class, l):
-        hash_centers = np.load(self.config['center_path'])
-        self.evaluate_centers(hash_centers)
-        hash_centers = hash_centers[l]
-        Z = torch.from_numpy(hash_centers).float().cuda()
-        return Z
-    
-    def evaluate_centers(self, H):
-        dist = []
-        for i in range(H.shape[0]):
-            for j in range(i+1, H.shape[0]):
-                    TF = np.sum(H[i] != H[j])
-                    dist.append(TF)
-        dist = np.array(dist)
-        st = dist.mean() - dist.var() + dist.min()
-        print(f"mean is {dist.mean()}; min is {dist.min()}; var is {dist.var()}; max is {dist.max()}")
+        return loss, L_C, L_P, L_Q

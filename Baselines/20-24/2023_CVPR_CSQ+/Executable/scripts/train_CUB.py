@@ -1,9 +1,6 @@
-# from loss.HashNetLoss import HashNetLoss
-from loss.ourLoss import *
+from loss.ourLoss import OurLoss
 from scripts.head import *
-from scripts.utils import CalcTopMap, compute_result, pr_curve, save_map_result
-from dataset.online_loader import *
-from tqdm import tqdm
+from scripts.utils import CalcTopMap, compute_result, pr_curve
 
 # writer = SummaryWriter()
 
@@ -42,8 +39,9 @@ def train_val(config, bit, l):
     Best_map = 0
     print('finish load config')
 
-    criterion = OurLoss(config, bit, l)
-    print(f'dmin: {criterion.d_min}, dmax: {criterion.d_max}')
+    criterion = OurLoss(config, bit)
+    # criterion = OurLoss(config, bit, l)
+    # print(f'dmin: {criterion.d_min}, dmax: {criterion.d_max}')
 
     print('baseline...')
 
@@ -60,28 +58,32 @@ def train_val(config, bit, l):
         train_loss = 0
         train_center_loss = 0
         train_pair_loss = 0
+        train_q_loss = 0
         for img, label, ind in tqdm(train_loader):
             img = img.cuda()
-            label = label.cuda()
+            label = label.cuda()  # label 64x10的onehot函数标签
             optimizer.zero_grad()
 
-            u1, u2 = net(img, None, None)
-            loss, center_loss, pair_loss = criterion(u1, u2, label, ind, epoch)
+            u1, u2 = net(img, None, None) # u1 对应的哈希映射结果(64x64) u2 feature
+            # loss, center_loss, pair_loss = criterion(u1, u2, label, ind, epoch)
+            loss, center_loss, pair_loss, q_loss = criterion(u1, label)
             if config['n_gpu'] > 1:
                 loss = loss.mean()
                 center_loss = center_loss.mean()
                 pair_loss = pair_loss.mean()
+                q_loss = q_loss.mean()
             train_loss += loss.item()
             train_center_loss += center_loss.item()
             if epoch >= config['epoch_change']:
                 train_pair_loss += pair_loss.item()
+                train_q_loss += q_loss.item()
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(net.parameters(), config['max_norm'])
             optimizer.step()
 
         train_loss /= len(train_loader)
-        logger.info(f"train loss: {train_loss}, center loss: {train_center_loss}, pair loss: {train_pair_loss}")
+        logger.info(f"train loss: {train_loss}, center loss: {train_center_loss}, pair loss: {train_pair_loss}, quantization loss: {train_q_loss}")
         # writer.add_scalar('train_loss', train_loss, epoch)
 
         if (epoch + 1) % config['test_map'] == 0:
@@ -95,8 +97,8 @@ def train_val(config, bit, l):
                 Best_map = mAP
                 count = 0
                 if 'save_path' in config:
-                    if not os.path.exists(config['save_path']):
-                        os.makedirs(config['save_path'])
+                    # if not os.path.exists(config['save_path']):
+                    #     os.makedirs(config['save_path'])
                     logger.info(f'save in ./results/{config["dataset"]}/{config["loss_way"]}')
             else:
                 if count == config['stop_iter']:
@@ -105,8 +107,7 @@ def train_val(config, bit, l):
                     # with open(f'./results/{config["dataset"]}/{config["loss_way"]}/map_result.txt', 'a') as f:
                     #     f.write(str(bit) + '\t' + 'valid: ' + str(Best_map) + '\t' + 'start time: ' + str(start_time) +
                     #             '\t' + 'end_time:' + str(end_time) + '\t' + str(config) + '\n')
-                    save_map_result(config, bit, Best_map, start_time, end_time)
-                    break
+                    # break
                 count += 1
             logger.info(
                 f"{config['info']} {epoch + 1}/{config['epoch']} {current_time} bits: {bit} dataset: {config['dataset']} Best mAP: {Best_map}, current mAP: {mAP}")
@@ -116,10 +117,8 @@ def train_val(config, bit, l):
             # with open(f'./results/{config["dataset"]}/{config["loss_way"]}/map_result.txt', 'a') as f:
             #     f.write(str(bit) + '\t' + 'valid: ' + str(Best_map) + '\t' + 'start time: ' + str(start_time) +
             #             '\t' + 'end_time:' + str(end_time) + '\t' + str(config) + '\n')
-            save_map_result(config, bit, Best_map, start_time, end_time)
-
             if 'save_path' in config:
-                if not os.path.exists(config['save_path']):
-                    os.makedirs(config['save_path'])
+                # if not os.path.exists(config['save_path']):
+                #     os.makedirs(config['save_path'])
                 logger.info(f'save in ./results/{config["dataset"]}/{config["loss_way"]}')
     # writer.close()

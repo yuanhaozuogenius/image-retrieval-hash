@@ -37,7 +37,7 @@ def get_config():
         "crop_size": 224,
         "batch_size": 64,
         "net": build_blip_net,
-        "dataset": "cifar10-1",
+        "dataset": "cifar10",
         "epoch": 150,
         "test_map": 10,
         "device": torch.device("cuda:0"),
