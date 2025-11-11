@@ -55,6 +55,7 @@ parser.add_argument('--centerWeight_path', type=str, default='../data/')
 parser.add_argument('--centers_path', type=str, default='../data/voc/16_voc_20_class.pkl')
 
 # network config
+# parser.add_argument('--center_update', action='store_false', help="update hash center or not?")
 parser.add_argument('--center_update', action='store_true', help="update hash center or not?")
 parser.add_argument('--w2v_dim', type=int, default=768, help="output dim of word embedding")
 # parser.add_argument('--multi_label', type=bool, default=True, help="multi label hashing")
@@ -76,7 +77,7 @@ parser.add_argument('--alpha_2', type=float, default=0.5, help='hyper-parameter 
 
 parser.add_argument('--beta_sigmoid', type=float, default=0.1, help="coefficient beta of sigmoid function in BCELoss")
 # Testing
-parser.add_argument('--R', type=int, default=3000, help='MAP@R')
+parser.add_argument('--R', type=int, default=5000, help='MAP@R')
 parser.add_argument('--T', type=float, default=0, help='Threshold for binary')
 parser.add_argument('--model_name', type=str, default='imagenet_64bit_0.873_resnet50.pkl',
                     help='Put any model you want to test here')

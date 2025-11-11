@@ -131,7 +131,7 @@ class Engine(object):
             'model_hash_dict': model_hash.module.state_dict() if option.use_gpu and torch.cuda.is_available() else model_hash.state_dict(),
             'model_center_dict': model_center.module.state_dict() if option.use_gpu and torch.cuda.is_available() else model_center.state_dict(),
             'optimizer_hash_dict': optimizer_hash.state_dict(),
-            'optimizer_center_dict': optimizer_center.state_dict(),
+            'optimizer_center_dict': optimizer_center.state_dict() if optimizer_center is not None else None,
             'best_MAP': state['best_MAP']
         }
         # self.save_checkpoint(option, state, model_dict, is_best)
@@ -256,21 +256,36 @@ class Engine(object):
                                 Hash_center_pre,
                                 center_weight):
         hash_centers = self.useGPU(torch.FloatTensor(torch.FloatStorage()))
-        for (i, label) in enumerate(labels):
-            one_labels = (label == 1).nonzero()
-            one_labels = one_labels.squeeze(1)
-            Centers = Hash_center_pre[one_labels][:]
-            center_weight_one = center_weight[i][one_labels]
-            center_mean = torch.sum(Centers * center_weight_one.view(-1, 1), dim=0)
+        if Hash_center_pre.dim() == 3:
+            Hash_center_pre = Hash_center_pre[0]
+
+        for i, label in enumerate(labels):
+            one_labels = (label == 1).nonzero().squeeze(1)
+
+            # 取该样本激活类对应中心
+            Centers = Hash_center_pre[one_labels, :]  # [N_active, 64]
+
+            # 取该样本对应权重
+            cw = center_weight[i]
+            if cw.dim() > 1:
+                cw = cw.view(-1)
+            cw = cw[one_labels]  # [N_active]
+
+            # 加权求均值
+            center_mean = torch.sum(Centers * cw.view(-1, 1), dim=0)
             hash_centers = torch.cat((hash_centers, center_mean.view(1, -1)), dim=0)
         return hash_centers
 
-    def forward_hashCenter(self, centerModel, loader):
 
-        for i, (input, target) in enumerate(loader):
-            word_embedding = self.useGPU(input[2][0])
-            hashCenter_pre = centerModel(word_embedding)
-            return hashCenter_pre
+    def forward_hashCenter(self, centerModel, loader):
+        all_centers = []
+        for input, target in loader:
+            word_embedding = self.useGPU(input[2]['word_embeddings'])
+            hashCenter_pre, _ = centerModel(word_embedding)
+            all_centers.append(hashCenter_pre)
+            last_word_embedding = word_embedding
+        return torch.cat(all_centers, dim=0), last_word_embedding
+
 
     def initCenterWeight(self, data_loader):
 
@@ -383,7 +398,7 @@ class Engine(object):
     def resume(self, model_hash, model_center, optimizer_hash, optimizer_center):
         path_checkpoint = option.resume_path
         if option.resume and os.path.exists(path_checkpoint):
-            # checkpoint = torch.load(path_checkpoint)
+            checkpoint = torch.load(path_checkpoint)
             model_hash.load_state_dict(checkpoint['model_hash_dict'])
             model_center.load_state_dict(checkpoint['model_center_dict'])
             optimizer_hash.load_state_dict(checkpoint['optimizer_hash_dict'])

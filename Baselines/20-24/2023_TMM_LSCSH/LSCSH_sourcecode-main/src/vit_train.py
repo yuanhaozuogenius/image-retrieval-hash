@@ -451,7 +451,7 @@ class Engine(object):
 
     def saveStatus(self, epoch, centerWeight_train, hashCenter_pre, MAP, result_all=None):
 
-        np.save('../data/' + self.option.data_name + '/centers.npy', hashCenter_pre.detach().cpu().numpy())
+        # np.save('../data/' + self.option.data_name + '/centers.npy', hashCenter_pre.detach().cpu().numpy())
         if MAP >= self.state['best_MAP']:
             if self.state['Database_hashpool_path'] is not None and os.path.exists(
                     self.state['Database_hashpool_path']):

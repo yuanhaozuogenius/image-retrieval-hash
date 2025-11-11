@@ -2,9 +2,9 @@
 
 ### how to run 
 
-先跑`optimAccel.py`  修改bit, n_class  
-检查`utils.py`、`train_CUB.py`
-在`main.py` 运行
+1. 跑`optimAccel.py`  修改bit, n_class  
+2. 检查`utils.py`、`train_CUB.py`  
+3. 运行`main.py` 
 
 
 ### Code

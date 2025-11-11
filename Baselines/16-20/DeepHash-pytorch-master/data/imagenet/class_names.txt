@@ -1,0 +1,100 @@
+0	tench
+1	goldfish
+2	great white shark
+3	tiger shark
+4	hammerhead
+5	electric ray
+6	stingray
+7	cock
+8	hen
+9	goldfinch
+10	indigo bunting
+11	bulbul
+12	magpie
+13	chickadee
+14	water ouzel
+15	kite
+16	bald eagle
+17	great grey owl
+18	common newt
+19	spotted salamander
+20	axolotl
+21	tailed frog
+22	loggerhead
+23	leatherback turtle
+24	mud turtle
+25	terrapin
+26	banded gecko
+27	common iguana
+28	whiptail
+29	agama
+30	green lizard
+31	Komodo dragon
+32	American alligator
+33	thunder snake
+34	hognose snake
+35	green snake
+36	king snake
+37	garter snake
+38	vine snake
+39	night snake
+40	boa constrictor
+41	green mamba
+42	sea snake
+43	horned viper
+44	diamondback
+45	sidewinder
+46	harvestman
+47	scorpion
+48	black and gold garden spider
+49	barn spider
+50	garden spider
+51	black widow
+52	tarantula
+53	wolf spider
+54	tick
+55	black grouse
+56	ptarmigan
+57	prairie chicken
+58	peacock
+59	macaw
+60	sulphur-crested cockatoo
+61	lorikeet
+62	coucal
+63	bee eater
+64	hornbill
+65	hummingbird
+66	toucan
+67	drake
+68	goose
+69	black swan
+70	wallaby
+71	wombat
+72	jellyfish
+73	sea anemone
+74	flatworm
+75	nematode
+76	conch
+77	snail
+78	sea slug
+79	chiton
+80	chambered nautilus
+81	Dungeness crab
+82	rock crab
+83	spiny lobster
+84	crayfish
+85	hermit crab
+86	white stork
+87	spoonbill
+88	flamingo
+89	bittern
+90	crane
+91	limpkin
+92	American coot
+93	bustard
+94	red-backed sandpiper
+95	redshank
+96	oystercatcher
+97	pelican
+98	albatross
+99	sea lion

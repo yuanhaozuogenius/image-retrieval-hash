@@ -18,18 +18,22 @@ class CenterModel(nn.Module):
                                            self.last_layer)
 
     def forward(self, word_embeddings):
-        if self.option.center_update:
+        data_name = self.option.data_name
+        num_classes = self.class_num_dict[data_name]
+        file_path = f"../data/{data_name}/{self.hash_bit}_{data_name}_{num_classes}_class.pkl"
+        if self.option.center_update:   #
             hash_centers = self.to_center(word_embeddings.float())
+            # 2️⃣ 自动保存，下次可直接加载
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            with open(file_path, "wb") as f:
+                torch.save(hash_centers.detach().cpu(), f)
         else:
-            file_path = '../data/' + self.option.data_name + '/' + str(
-                self.hash_bit) + '_' + self.option.data_name + '_' + str(
-                self.class_num_dict[self.option.data_name]) + '_class.pkl'
             if os.path.exists(file_path):
                 center_file = open(file_path, 'rb')
-                hash_centers = torch.load(center_file)
+                hash_centers = torch.load(center_file, weights_only=True)
             elif os.path.exists(self.option.centers_path):
                 center_file = open(self.option.ceters_path, 'rb')
-                hash_centers = torch.load(center_file)
+                hash_centers = torch.load(center_file, weights_only=True)
         return hash_centers.cuda() if self.option.use_gpu and torch.cuda.is_available() else hash_centers, word_embeddings
 
     def getConfig_params(self):

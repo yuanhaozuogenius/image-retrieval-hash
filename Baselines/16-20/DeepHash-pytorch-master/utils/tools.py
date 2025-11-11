@@ -41,8 +41,8 @@ def config_dataset(config):
     elif config["dataset"] == "coco":
         config["topK"] = 5000
         config["n_class"] = 80
-    elif config["dataset"] == "imagenet":
-        config["topK"] = 1000
+    elif config["dataset"] == "ImageNet100":
+        config["topK"] = 5000
         config["n_class"] = 100
     elif config["dataset"] == "mirflickr":
         config["topK"] = 5000
@@ -253,17 +253,17 @@ def cifar_dataset(config):
                                                batch_size=batch_size,
                                                # shuffle=True, 在txt文本中已经做了shuffle
                                                shuffle=False,
-                                               num_workers=4)
+                                               num_workers=16)
 
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
                                               batch_size=batch_size,
                                               shuffle=False,
-                                              num_workers=4)
+                                              num_workers=16)
 
     database_loader = torch.utils.data.DataLoader(dataset=database_dataset,
                                                   batch_size=batch_size,
                                                   shuffle=False,
-                                                  num_workers=4)
+                                                  num_workers=16)
 
     return train_loader, test_loader, database_loader, \
         train_index.shape[0], test_index.shape[0], database_index.shape[0]
@@ -298,7 +298,7 @@ def get_data(config):
         dset_loaders[data_set] = util_data.DataLoader(
             dsets[data_set],
             batch_size=data_config[data_set]["batch_size"],
-            shuffle=False, num_workers=4  # 改为False，在txt文本中已经做了shuffle
+            shuffle=False, num_workers=16  # 改为False，在txt文本中已经做了shuffle
         )
 
     return dset_loaders["train_set"], dset_loaders["test"], dset_loaders["database"], \
