@@ -2,6 +2,7 @@ import pickle
 
 import torch.nn as nn
 import torch
+import torch.nn.functional as F
 from common.logger import Logger
 
 
@@ -10,20 +11,21 @@ class Loss(nn.Module):
         super(Loss, self).__init__()
         self.option = option
         self.cal_centerLoss = CenterLoss(option, state, option.radius, option.gamma, option.beta)
+
     def forward(self, hashCode, hashCenter, center_pre, centerWeight, labels):
         centerLoss = self.cal_centerLoss(hashCode, hashCenter, center_pre)
         quantizationLoss = torch.mean((torch.abs(hashCode) - 1.0) ** 2)
         temp = centerWeight * torch.log(centerWeight)
         temp = torch.where(torch.isnan(temp), self.useGPU(torch.tensor(0., requires_grad=False)), temp)
         centerWeight_Regulation = torch.sum(temp, dim=1).mean()
-        return centerLoss + 0.05 * quantizationLoss + 0.001 * centerWeight_Regulation
+
+        return centerLoss + self.option.lambda_Q * quantizationLoss + self.option.lambda_R * centerWeight_Regulation
 
     def useGPU(self, x):
         if self.option.use_gpu and torch.cuda.is_available():
             return x.cuda()
         else:
             return x
-
 
 
 class HashCenterLoss(nn.Module):
@@ -35,13 +37,12 @@ class HashCenterLoss(nn.Module):
         self.centerLoss = CenterLoss(self.option, self.state)
         self.is_multi_label = True if option.data_name == 'voc2012' or option.data_name == 'coco' or option.data_name == 'nuswide' else False
 
-
     def forward(self, word_embedding, hashCenter_independent, centerWeight, path):
 
         file = open(path, 'rb')
         center_loss = 0.
         index = 0
-        bigBatch_size = 100  
+        bigBatch_size = 100
         while True:
             try:
                 data = pickle.load(file)
@@ -90,10 +91,10 @@ class HashCenterLoss(nn.Module):
 
     def Hash_center_multilables(self, labels,
                                 Hash_center_pre,
-                                center_weight):  
+                                center_weight):
         hash_centers = self.useGPU(torch.FloatTensor(torch.FloatStorage()))
         for (i, label) in enumerate(labels):
-            one_labels = (label == 1).nonzero()  
+            one_labels = (label == 1).nonzero()
             one_labels = one_labels.squeeze(1)
             Centers = Hash_center_pre[one_labels]
             center_weight_one = center_weight[i][one_labels]
@@ -225,8 +226,13 @@ class CenterLoss(nn.Module):
 
     def forward(self, hashCode, hashCenters, center_pre):
         if self.centerLoss_type == 'BCELoss':
-            pass
-            
+            # 将输出映射到 [0,1] 区间
+            hashCode = torch.sigmoid(hashCode)
+            hashCenters = 0.5 * (hashCenters + 1)
+            # 计算 BCE loss
+            loss = F.binary_cross_entropy(hashCode, hashCenters)
+            return loss
+
         elif self.centerLoss_type == 'CELoss':
             q = 0.5 * (hashCode + 1)
             p = 0.5 * (hashCenters + 1)
@@ -263,3 +269,6 @@ class CenterLoss(nn.Module):
             sim_negative = torch.sum(sim_negative, dim=1)
             loss = - torch.log(sim_positive / sim_negative)
             return loss.mean()
+        # 防止未来扩展遗漏 return
+        else:
+            raise ValueError(f"Unknown centerLoss_type: {self.centerLoss_type}")

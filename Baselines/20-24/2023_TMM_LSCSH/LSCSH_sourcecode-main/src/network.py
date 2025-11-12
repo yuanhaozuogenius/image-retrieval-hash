@@ -3,8 +3,7 @@ import os
 import torch.nn as  nn
 import torchvision
 import torch
-from torchvision import models
-from torchvision.models._api import WeightsEnum, get_model_weights
+
 
 class CenterModel(nn.Module):
     def __init__(self, option):
@@ -18,22 +17,18 @@ class CenterModel(nn.Module):
                                            self.last_layer)
 
     def forward(self, word_embeddings):
-        data_name = self.option.data_name
-        num_classes = self.class_num_dict[data_name]
-        file_path = f"../data/{data_name}/{self.hash_bit}_{data_name}_{num_classes}_class.pkl"
-        if self.option.center_update:   #
+        if self.option.center_update:
             hash_centers = self.to_center(word_embeddings.float())
-            # 2️⃣ 自动保存，下次可直接加载
-            os.makedirs(os.path.dirname(file_path), exist_ok=True)
-            with open(file_path, "wb") as f:
-                torch.save(hash_centers.detach().cpu(), f)
         else:
+            file_path = '../data/' + self.option.data_name + '/' + str(
+                self.hash_bit) + '_' + self.option.data_name + '_' + str(
+                self.class_num_dict[self.option.data_name]) + '_class.pkl'
             if os.path.exists(file_path):
                 center_file = open(file_path, 'rb')
-                hash_centers = torch.load(center_file, weights_only=True)
+                hash_centers = torch.load(center_file)
             elif os.path.exists(self.option.centers_path):
                 center_file = open(self.option.ceters_path, 'rb')
-                hash_centers = torch.load(center_file, weights_only=True)
+                hash_centers = torch.load(center_file)
         return hash_centers.cuda() if self.option.use_gpu and torch.cuda.is_available() else hash_centers, word_embeddings
 
     def getConfig_params(self):
@@ -50,12 +45,7 @@ class HashModel(nn.Module):
         super(HashModel, self).__init__()
         self.option = option
         self.hash_bit = option.hash_bit
-
-        model_fn = getattr(models, option.model_type)
-        weights_enum = get_model_weights(model_fn)
-        weights = weights_enum.DEFAULT if weights_enum is not None else None
-        self.base_model = model_fn(weights=weights)
-
+        self.base_model = getattr(torchvision.models, option.model_type)(pretrained=True)
         self.conv1 = self.base_model.conv1
         self.bn1 = self.base_model.bn1
         self.relu = self.base_model.relu
@@ -94,12 +84,7 @@ class AlexNetFc(nn.Module):
     def __init__(self, option):
         self.option = option
         super(AlexNetFc, self).__init__()
-
-        model_fn = models.alexnet
-        weights_enum = get_model_weights(model_fn)
-        weights = weights_enum.DEFAULT if weights_enum is not None else None
-        self.base_model = model_fn(weights=weights)
-
+        self.base_model = torchvision.models.alexnet(pretrained=True)
         self.features = self.base_model.features
         self.classifier = nn.Sequential()
         for i in range(6):

@@ -2,22 +2,42 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-
+from utils.optimizeAccel import build_hash_centers
+from utils.tools import count_labels_nums
+import os
 
 class CSQPlusLoss(nn.Module):
     def __init__(self, config, bit):
         super().__init__()
         self.config = config
         self.bit = bit
-        # 读取预先生成好的 hash center [n_class, bit]
-        hash_centers = np.load(config['center_path'])  # shape [num_stage, n_class, bit]
+
+        dataset = config.get("dataset")
+        n_class = count_labels_nums()
+        center_path = f"./data/{dataset}/CSQ_init_True_{n_class}_{bit}.npy"
+
+        if not os.path.exists(center_path):
+            print(
+                f"[CSQPlusLoss] Hash centers not found → Generating for dataset '{dataset}' ({n_class} classes, {bit}-bit)")
+            hash_centers = build_hash_centers(
+                n_class=n_class,
+                bit=bit,
+                dataset=dataset,
+                initWithCSQ=True,
+                save=True
+            )
+        else:
+            print(f"[CSQPlusLoss] Using existing centers: {center_path}")
+            hash_centers = np.load(center_path)
+
+        # === 缓存路径并转换为 Tensor === #
         self.hash_center = torch.from_numpy(hash_centers).float().cuda()
         self.label_center = torch.eye(config['n_class']).float().cuda()  # one-hot 类别向量
 
     def forward(self, u, y):
         """
-        u: [batch, bit] 经过ResNet + tanh输出的连续哈希码
-        y: [batch, n_class] one-hot标签
+        u: [batch, bit] 经过ResNet + tanh输出的连续哈希向量
+        y: [batch, n_class] one-hot标签向量
         """
         # -------------------------
         # 1. L_C: center similarity loss

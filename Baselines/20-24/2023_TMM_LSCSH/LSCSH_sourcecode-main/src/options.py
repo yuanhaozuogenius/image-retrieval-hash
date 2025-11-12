@@ -10,14 +10,13 @@ parser.add_argument('--resume', action='store_true', help="resume from pretraine
 parser.add_argument('--resume_weight_path', default='', type=str, help='resume weight path')
 # Training
 
-# parser.add_argument('--data_name', type=str, default='voc2012', help='voc or coco...')
-parser.add_argument('--data_name', type=str, default='coco', help='voc or coco or cifar10-1...')
-parser.add_argument('--data_path', type=str, default= r"D:\Datasets\coco2017", help='dataset path...')
+parser.add_argument('--data_name', type=str, default='coco', help='voc or coco...')
+parser.add_argument('--data_path', type=str, default='../../data/voc', help='dataset path...')
 
 parser.add_argument('--lr', type=float, default=0.0001, help='learning rate')
 parser.add_argument('--lr_center', type=float, default=0.0001, help='learning rate for center update')
 
-parser.add_argument('--epochs', type=int, default=100, help='training epoch')
+parser.add_argument('--epochs', type=int, default=90, help='training epoch')
 parser.add_argument('--use_gpu', type=bool, default=True, help="use gpu ?")
 # parser.add_argument('--gpu_ids', nargs='+', type=int, default=None, help='gpu devices ids')
 parser.add_argument('--gpus', type=str, default="0", help="define gpu id")
@@ -30,16 +29,16 @@ parser.add_argument('--momentum', type=float, default=0.9, help='the momentum fo
 parser.add_argument('--eval_frequency', type=int, default=4, help='the evaluate frequency for testing')
 parser.add_argument('--image_size', type=int, default=224, help='image size')
 
-parser.add_argument('--word2vec_file', type=str, default='/home/xx/Projects/Supervised_Baselines/LSCSH_sourcecode-main/data/voc2012/voc2012_bert768_word2vec.pkl',
+parser.add_argument('--word2vec_file', type=str, default='../data/coco/coco_bert768_word2vec.pkl',
                     help='word to vector file path')
 
 parser.add_argument('--num_class', type=int, default=80, help='The number of classes')
-parser.add_argument('--workers', type=int, default=4, help='number of data loader workers.')
+parser.add_argument('--workers', type=int, default=16, help='number of data loader workers.')
 parser.add_argument('--multi_lr', type=float, default=0.01, help='multiplier for learning rate')
 parser.add_argument('--lambda_Q', type=float, default=0.05, help='hyper-parameters for quantization loss')
 parser.add_argument('--lambda1', type=float, default=0.2, help='hyper-parameters 1')
 parser.add_argument('--lambda2', type=float, default=0.05, help='hyper-parameters 1')
-parser.add_argument('--centerLoss_type', type=str, default='CELoss', help='BCELoss CauchyLoss MarginLoss...')
+parser.add_argument('--centerLoss_type', type=str, default='BCELoss', help='BCELoss CauchyLoss MarginLoss...')
 parser.add_argument('--eta', type=float, default=0.1,
                     help="hyper-parameters for alternative optimization in solution of center weight updating")
 
@@ -52,10 +51,9 @@ parser.add_argument('--fixed_weight', action='store_true', help="fix center weig
 
 parser.add_argument('--centerWeight_path', type=str, default='../data/')
 
-parser.add_argument('--centers_path', type=str, default='../data/voc/16_voc_20_class.pkl')
+parser.add_argument('--centers_path', type=str, default='../data/coco/64_coco_80_class.pkl')
 
 # network config
-# parser.add_argument('--center_update', action='store_false', help="update hash center or not?")
 parser.add_argument('--center_update', action='store_true', help="update hash center or not?")
 parser.add_argument('--w2v_dim', type=int, default=768, help="output dim of word embedding")
 # parser.add_argument('--multi_label', type=bool, default=True, help="multi label hashing")
@@ -77,9 +75,9 @@ parser.add_argument('--alpha_2', type=float, default=0.5, help='hyper-parameter 
 
 parser.add_argument('--beta_sigmoid', type=float, default=0.1, help="coefficient beta of sigmoid function in BCELoss")
 # Testing
-parser.add_argument('--R', type=int, default=5000, help='MAP@R')
+parser.add_argument('--R', type=int, default=3000, help='MAP@R')
 parser.add_argument('--T', type=float, default=0, help='Threshold for binary')
 parser.add_argument('--model_name', type=str, default='imagenet_64bit_0.873_resnet50.pkl',
                     help='Put any model you want to test here')
-parser.add_argument('--start_test_epoch', type=int, default=20, help="start test epoch")
+parser.add_argument('--start_test_epoch', type=int, default=1, help="start test epoch")
 parser.add_argument('--center_model', default='center', type=str, help='type of center model')

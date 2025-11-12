@@ -7,6 +7,7 @@ python train.py \
   --epochs 90 \
   --fixed_weight \
   --center_update \
-  --R 1000 \
+  --R 5000 \
   --batch_size 64 \
-  --hash_bit 64
+  --hash_bit 64 \
+  --start_test_epoch 30

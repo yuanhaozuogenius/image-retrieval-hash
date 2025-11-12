@@ -13,12 +13,11 @@ class Logger:
     def info(message):
         time = datetime.datetime.now()
         timeStr = time.strftime("[%Y%m%d-%H:%M:%S]")
-        print(timeStr + '=>[2023 LSCSH]: {}'.format(message),flush=True)
+        print(timeStr + '=>[info]: {}'.format(message),flush=True)
 
     @staticmethod
     def getTimeStr(time):
-        timeStr = time.strftime("[%m%d-%H:%M:%S]")
-        return timeStr
+        return time.strftime("%Y-%m-%d_%H-%M-%S")
 
 
 if __name__ == '__main__':

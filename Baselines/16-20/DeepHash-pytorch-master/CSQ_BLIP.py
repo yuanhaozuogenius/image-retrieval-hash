@@ -37,13 +37,15 @@ def get_config():
         "crop_size": 224,
         "batch_size": 64,
         "net": build_blip_net,
-        "dataset": "cifar10",
-        "epoch": 150,
-        "test_map": 10,
+        "dataset": "coco",
+        "epoch": 120,
+        "test_map": 30,
         "device": torch.device("cuda:0"),
         "bit_list": [64],  # 哈希码位数
         "save_path": "save/CSQ_BLIP",
-        "cifar10_dir": r"D:\Datasets\cifar10"
+        # "cifar10_dir": r"D:\Datasets\cifar10",
+        "image_root": r"D:\Datasets\coco2017",
+
     }
     config = config_dataset(config)
     return config
@@ -149,23 +151,22 @@ def train_val(config, bit):
 
     for epoch in range(config["epoch"]):
         current_time = time.strftime('%H:%M:%S', time.localtime(time.time()))
-        print("%s[%2d/%2d][%s] bit:%d, dataset:%s, training...." % (
-            config["info"], epoch + 1, config["epoch"], current_time, bit, config["dataset"]), end="")
 
         net.train()
         train_loss = 0
-        for image, label, ind in train_loader:
+        for image, labels, ind, path in train_loader:
             image = image.to(device)
-            label = label.to(device)
+            labels = labels.to(device)
             optimizer.zero_grad()
             u = net(image)
-            loss = criterion(u, label.float(), ind, config)
+            loss = criterion(u, labels.float(), ind, config)
             train_loss += loss.item()
             loss.backward()
             optimizer.step()
 
         train_loss = train_loss / len(train_loader)
-        print("\b\b\b\b\b\b\b loss:%.3f" % (train_loss))
+        print(f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
+              f"total loss:{train_loss:.3f}")
 
         if (epoch + 1) % config["test_map"] == 0:
             tst_binary, tst_label = compute_result(test_loader, net, device=device)
@@ -175,8 +176,8 @@ def train_val(config, bit):
             if mAP > Best_mAP:
                 Best_mAP = mAP
                 if "save_path" in config:
-                    if not os.path.exists(config["save_path"]):
-                        os.makedirs(config["save_path"])
+                    # if not os.path.exists(config["save_path"]):
+                    #     os.makedirs(config["save_path"])
                     print("save in ", config["save_path"])
                     save_path = config["save_path"]
                     # 替换 "-" → "_"，确保正则或文件名不会误解析
@@ -185,14 +186,13 @@ def train_val(config, bit):
                     score_str = f"{mAP:.10f}"
                     filename_prefix = f"{dataset_tag}-{score_str}"
                     # 保存模型及中间文件
-                    np.save(os.path.join(save_path, f"{filename_prefix}-trn_binary.npy"), trn_binary.numpy())
-                    np.save(os.path.join(save_path, f"{filename_prefix}-tst_binary.npy"), tst_binary.numpy())
-                    np.save(os.path.join(save_path, f"{filename_prefix}-trn_label.npy"), trn_label.numpy())
-                    np.save(os.path.join(save_path, f"{filename_prefix}-tst_label.npy"), tst_label.numpy())
-                    torch.save(net.state_dict(), os.path.join(save_path, f"{filename_prefix}-model.pt"))
+                    # np.save(os.path.join(save_path, f"{filename_prefix}-trn_binary.npy"), trn_binary.numpy())
+                    # np.save(os.path.join(save_path, f"{filename_prefix}-tst_binary.npy"), tst_binary.numpy())
+                    # np.save(os.path.join(save_path, f"{filename_prefix}-trn_label.npy"), trn_label.numpy())
+                    # np.save(os.path.join(save_path, f"{filename_prefix}-tst_label.npy"), tst_label.numpy())
+                    # torch.save(net.state_dict(), os.path.join(save_path, f"{filename_prefix}-model.pt"))
             print("%s epoch:%d, bit:%d, dataset:%s, MAP:%.3f, Best MAP: %.3f" % (
                 config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))
-            print(config)
 
 
 if __name__ == "__main__":

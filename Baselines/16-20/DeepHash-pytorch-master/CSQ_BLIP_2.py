@@ -43,7 +43,7 @@ def get_config():
         # "dataset": "cifar10",
         "dataset": "coco",
         "epoch": 120,
-        "test_map": 10,
+        "test_map": 30,
         "device": torch.device("cuda:0"),
         "bit_list": [64],
         "save_path": "save/CSQ_BLIP_2",

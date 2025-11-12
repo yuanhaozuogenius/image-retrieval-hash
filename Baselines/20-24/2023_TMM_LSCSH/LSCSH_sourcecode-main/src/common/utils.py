@@ -1,5 +1,4 @@
 import math, os, sys
-
 import pickle
 from urllib.request import urlretrieve
 import torch
@@ -15,21 +14,21 @@ DEBUG_UTIL = False
 
 
 def getDatabaseHashPoolPath(option, state):
-    time = Logger.getTimeStr(state['start_time']).replace(":", "-")
+    time = Logger.getTimeStr(state['start_time'])
     path = "../data/" + option.data_name + "/" + option.data_name + "_" + str(option.hash_bit) + "bit_" + str(
         state['epoch']) + "e_" + time + "_database.pkl"
     return path
 
 
 def getTrainbaseHashPoolPath(option, state):
-    time = Logger.getTimeStr(state['start_time']).replace(":", "-")
+    time = Logger.getTimeStr(state['start_time'])
     path = "../data/" + option.data_name + "/" + option.data_name + "_" + str(option.hash_bit) + "bit_" + str(
         state['epoch']) + "e_" + time + "_trainbase.pkl"
     return path
 
 
 def getWeightBestPath(option, state):
-    time = Logger.getTimeStr(state['start_time']).replace(":", "-")
+    time = Logger.getTimeStr(state['start_time'])
     path = "../data/" + option.data_name + "/" + option.data_name + "_" + time + "_weight.npy"
     return path
 
@@ -76,7 +75,7 @@ def loadHashPool(option, state, path, type='testbase'):
 
 
 def getTestbaseHashPoolPath(option, state):
-    time = Logger.getTimeStr(state['start_time']).replace(":", "-")
+    time = Logger.getTimeStr(state['start_time'])
 
     path = "../data/" + option.data_name + "/" + option.data_name + "_" + str(option.hash_bit) + "bit_" + str(
         state['epoch']) + "e_" + time + "_testbase.pkl"
@@ -85,10 +84,12 @@ def getTestbaseHashPoolPath(option, state):
 
 class Warp(object):
     def __init__(self, size, interpolation=Image.BILINEAR):
+
         self.size = int(size)
         self.interpolation = interpolation
 
     def __call__(self, img):
+
         return img.resize((self.size, self.size), self.interpolation)
 
     def __str__(self):
@@ -105,7 +106,7 @@ class MultiScaleCrop(object):
         self.fix_crop = fix_crop
         self.more_fix_crop = more_fix_crop
         self.input_size = input_size if not isinstance(input_size, int) else [input_size, input_size]
-        self.interpolation = Image.BILINEAR
+        self.interpolation = Image.BILINEAR  
 
     def __call__(self, img):
 
@@ -119,7 +120,7 @@ class MultiScaleCrop(object):
         image_w, image_h = im_size[0], im_size[1]
 
         base_size = min(image_w, image_h)
-        crop_sizes = [int(base_size * x) for x in self.scales]
+        crop_sizes = [int(base_size * x) for x in self.scales]  
         crop_h = [self.input_size[1] if abs(x - self.input_size[1]) < 3 else x for x in crop_sizes]
         crop_w = [self.input_size[0] if abs(x - self.input_size[0]) < 3 else x for x in crop_sizes]
 
@@ -149,22 +150,22 @@ class MultiScaleCrop(object):
         h_step = (image_h - crop_h) // 4
 
         ret = list()
-        ret.append((0, 0))
-        ret.append((4 * w_step, 0))
-        ret.append((0, 4 * h_step))
-        ret.append((4 * w_step, 4 * h_step))
-        ret.append((2 * w_step, 2 * h_step))
+        ret.append((0, 0))  
+        ret.append((4 * w_step, 0))  
+        ret.append((0, 4 * h_step))  
+        ret.append((4 * w_step, 4 * h_step))  
+        ret.append((2 * w_step, 2 * h_step))  
 
         if more_fix_crop:
-            ret.append((0, 2 * h_step))
-            ret.append((4 * w_step, 2 * h_step))
-            ret.append((2 * w_step, 4 * h_step))
-            ret.append((2 * w_step, 0 * h_step))
+            ret.append((0, 2 * h_step))  
+            ret.append((4 * w_step, 2 * h_step))  
+            ret.append((2 * w_step, 4 * h_step))  
+            ret.append((2 * w_step, 0 * h_step))  
 
-            ret.append((1 * w_step, 1 * h_step))
-            ret.append((3 * w_step, 1 * h_step))
-            ret.append((1 * w_step, 3 * h_step))
-            ret.append((3 * w_step, 3 * h_step))
+            ret.append((1 * w_step, 1 * h_step))  
+            ret.append((3 * w_step, 1 * h_step))  
+            ret.append((1 * w_step, 3 * h_step))  
+            ret.append((3 * w_step, 3 * h_step))  
 
         return ret
 
@@ -173,6 +174,8 @@ class MultiScaleCrop(object):
 
 
 def download_url(url, destination=None, progress_bar=True):
+    
+
     def my_hook(t):
         last_b = [0]
 

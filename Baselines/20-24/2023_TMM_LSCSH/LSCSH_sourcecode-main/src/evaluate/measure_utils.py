@@ -289,7 +289,7 @@ def calc_label_match_matrix(database_labels, query_labels):
 
     return LabelMatchs(np.dot(query_labels, database_labels.T) > 0)
 
-# MAP2  所有样本之间的相似度排序 top-R（即 option.R）进行检索
+
 def mean_average_precision(database_hash, test_hash, database_labels, test_labels, option):  
     R = option.R
     T = option.T
@@ -327,7 +327,7 @@ def mean_average_precision(database_hash, test_hash, database_labels, test_label
         Recall.append(r)
     return np.mean(np.array(APx)), np.mean(np.array(Recall)), np.mean(np.array(Pre))
 
-# MAP1 Hamming 距离小于 radius 的样本  作用：评估粗哈希（Hamming ball）检索性能
+
 def get_precision_recall_by_Hamming_Radius_optimized(database_output, database_labels, query_output, query_labels,
                                                      radius=2, label_matchs=None, coarse_sign=True, fine_sign=False):
 

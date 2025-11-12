@@ -12,8 +12,9 @@ from common.plot import Draw
 from dataloader.DataSet_loader import getDataLoader
 from evaluate.measure_utils import *
 from vit_modeling import VisionTransformer, VIT_CONFIGS
-from network import CenterModel
+from network import HashModel, CenterModel, AlexNetFc
 
+import torch.optim as optim
 from options import parser
 
 class Engine(object):
@@ -451,7 +452,7 @@ class Engine(object):
 
     def saveStatus(self, epoch, centerWeight_train, hashCenter_pre, MAP, result_all=None):
 
-        # np.save('../data/' + self.option.data_name + '/centers.npy', hashCenter_pre.detach().cpu().numpy())
+        np.save('../data/' + self.option.data_name + '/centers.npy', hashCenter_pre.detach().cpu().numpy())
         if MAP >= self.state['best_MAP']:
             if self.state['Database_hashpool_path'] is not None and os.path.exists(
                     self.state['Database_hashpool_path']):

@@ -38,9 +38,11 @@ def build_blip_net(bit, **kwargs):
 
 def get_config():
     config = {
-        "lambda": 0.0001,
+        # CSQ+ Loss
+        "beta": 1.0,  # L_P 权重
+        "lambda": 0.0001,  # L_Q 权重
         "optimizer": {"type": optim.RMSprop, "optim_params": {"lr": 1e-5, "weight_decay": 10 ** -5}},
-        "info": "[CSQ_BLIP_5]",
+        "info": "[CSQ_BLIP_6]",
         "resize_size": 224,
         "crop_size": 224,
         "batch_size": 64,
@@ -50,7 +52,7 @@ def get_config():
         "test_map": 40,
         "device": torch.device("cuda:0"),
         "bit_list": [64],
-        "save_path": "save/CSQ_BLIP_5",
+        "save_path": "save/CSQ_BLIP_6",
         # "cifar10_dir": r"D:\Datasets\cifar10-image",  # 后续将实际数据路径设置在 image_root 中 方便统一修改
         "image_root": r"D:\Datasets\coco2017",
         # —— 跨模态对齐控制 —— #
@@ -72,10 +74,6 @@ def get_config():
         # 同近异远
         "contrast_temp": 0.07,  # InfoNCE 温度
         "contrast_weight": 1.0,  # λ=1
-
-        # CSQ+ Loss
-        "beta": 1.0,  # L_P 权重
-        "lambda": 0.0001,  # L_Q 权重
 
         # —— 相对路径—— #
         "blip_dir": r"D:\Models\blip2-opt-2.7b",
@@ -393,12 +391,15 @@ def train_val(config, bit):
         align_loss_meter = 0.0
         id_loss_meter = 0.0
         contrast_loss_meter = 0.0
+        # csq+ loss
+        center_loss_meter = 0.0
+        pair_loss_meter = 0.0
+        q_loss_meter = 0.0
 
         for images, labels, ind, paths in train_loader:
 
             # ====== 进入一个 batch ======
-            # —— 搬到 GPU —— #
-            images = images.to(device, non_blocking=True)
+            images = images.to(device, non_blocking=True)  # 搬到 GPU
             if isinstance(labels, np.ndarray):
                 labels = torch.from_numpy(labels)
             labels = labels.to(device).float()
@@ -439,7 +440,7 @@ def train_val(config, bit):
             align_loss = align_criterion(v_adapt, t_adapt)
             # 让t_adapt和 t256的乘积最小——>最相似
             id_loss = F.mse_loss(F.normalize(t_adapt, dim=-1), t256)
-            csq_plus_loss, center_loss, pair_loss, q_loss = csqplus_criterion(u, labels, ind, config)
+            csq_plus_loss, center_loss, pair_loss, q_loss = csqplus_criterion(u, labels)
 
             img_feats = F.normalize(v_adapt, dim=-1)  # [B,256] 表示当前要查询的目标图像特征
 
@@ -487,23 +488,28 @@ def train_val(config, bit):
             align_loss_meter += align_loss.item()
             id_loss_meter += id_loss.item()
             contrast_loss_meter += contrast_loss.item()
+            center_loss_meter += center_loss.item()
+            pair_loss_meter += pair_loss.item()
+            q_loss_meter += q_loss.item()
 
         # 统计并打印 每个 batch 的 loss 会抖动,把整轮（epoch）里所有 batch 的 loss 求平均
         n_iter = len(train_loader)  # batch 数
         train_loss_avg = train_loss / n_iter
-        csq_loss_avg = csq_plus_loss_meter / n_iter
+        csq_plus_loss_avg = csq_plus_loss_meter / n_iter
         align_loss_avg = align_loss_meter / n_iter
         id_loss_avg = id_loss_meter / n_iter
         contrast_loss_avg = contrast_loss_meter / n_iter
+        center_loss_avg = center_loss_meter / n_iter
+        pair_loss_avg = pair_loss_meter / n_iter
+        q_loss_avg = q_loss_meter / n_iter
 
-        lr = optimizer.param_groups[0].get("lr", None)
-        lr_str = f"{lr:.1e}" if lr is not None else "NA"
         print(f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
-              f"bit:{bit}, dataset:{config['dataset']}, lr:{lr_str}, "
-              f"loss:{train_loss_avg:.3f} "
-              f"(csq:{csq_loss_avg:.3f}, align:{align_loss_avg:.3f}, id:{id_loss_avg:.3f}, "
-              f"contrast:{contrast_loss_avg:.3f}, α={align_weight:.2f}, β={text_anchor_weight:.2f}, λ={contrast_weight:.2f}, τ={tau:.2f}, "
-              f"mode:{config.get('align_mode', 'mse')})")
+              f"dataset:{config['dataset']}, bit:{bit},"
+              f"total loss:{train_loss_avg:.3f} = "
+              f"CSQ+:{csq_plus_loss_avg:.3f} ( "
+              f"L_C:{center_loss_avg:.3f} + L_P:{pair_loss_avg:.3f} + L_Q:{q_loss_avg:.3f} ) "
+              f"+ Align:{align_loss_avg:.3f} + ID:{id_loss_avg:.3f} + Contrast:{contrast_loss_avg:.3f}")
+
         # 评估与保存
         if (epoch + 1) % config["test_map"] == 0:
             tst_binary, tst_label = compute_result(test_loader, net, device=device)
