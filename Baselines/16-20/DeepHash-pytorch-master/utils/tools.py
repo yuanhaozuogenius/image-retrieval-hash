@@ -30,7 +30,7 @@ def config_dataset(config):
     base_path = "./data/"  # 相对路径，基于项目根目录
 
     if "cifar" in config["dataset"]:
-        config["topK"] = -1
+        config["topK"] = 5000
         config["n_class"] = 10
     elif config["dataset"] in ["nuswide_21", "nuswide_21_m"]:
         config["topK"] = 5000
@@ -48,7 +48,7 @@ def config_dataset(config):
         config["topK"] = 5000
         config["n_class"] = 38
     elif config["dataset"] in ["voc2012", "newvoc"]:
-        config["topK"] = 1000
+        config["topK"] = 5000
         config["n_class"] = 20
 
     config["data_path"] = base_path + config["dataset"] + "/"
