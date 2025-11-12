@@ -66,8 +66,8 @@ def get_config():
         # 图生文
         "caption_num_beams": 1,  # 建议 ≥2 以保证 sequences_scores 可用
         "caption_max_new_tokens": 32,  # 句长上限（越大越慢）
-        "captions_num": 3,  # 固定采样数 K
-        # "caption_prompt": "a photo of a",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
+        "captions_num": 10,  # 固定采样数 K
+        "caption_prompt": "a photo of a",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
 
         # —— 相对路径—— #
         "blip_dir": r"D:\Models\blip2-opt-2.7b",
@@ -233,7 +233,6 @@ class AlignmentLoss(nn.Module):
             raise ValueError("Unsupported align mode")
 
 
-
 def train_val(config, bit):
     device = config["device"]
     train_loader, test_loader, dataset_loader, num_train, num_test, num_dataset = get_data(config)
@@ -268,9 +267,10 @@ def train_val(config, bit):
         captioner=captioner,
         caps_cache_path=caps_cache_path,
         captions_num=captions_num,
-        prompt=prompt,
         device=device
     )
+
+    class2caps_prompt = make_prompt_for_captions(prompt, class2caps)
 
     # 释放 captioner 显存
     if torch.cuda.is_available():
@@ -297,7 +297,7 @@ def train_val(config, bit):
 
     # 将“每条 caption 的关键词列表”拼成一句短语（"; " 连接），逐条写入负样本库
     for c in range(n_class):
-        term_lists = class2caps.get(c, None)
+        term_lists = class2caps_prompt.get(c, None)
         if term_lists and len(term_lists) > 0:
             for text in term_lists:
                 if text:
@@ -307,7 +307,6 @@ def train_val(config, bit):
         # caption_bank : captions转换的张量。用于构建t256
         caption_bank = net.text_encoder.encode(texts).to(device)  # [Nneg, D]
         caption_bank = F.normalize(caption_bank, dim=-1)
-
 
     # 优化器（分组：fc1 / hash head / fc2）
     base_optim = config["optimizer"]

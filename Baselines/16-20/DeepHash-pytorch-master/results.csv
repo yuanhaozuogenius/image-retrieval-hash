@@ -1,5 +1,5 @@
 Dataset,Method,64Bit,128Bit,Remark
-COCO,DHN,0.716,
+COCO,DHN,0.690,
 COCO,DSH,0.675,
 COCO,Orthohash,0.6858
 COCO,LSCSH,0.7913 ,,MAP1 (Image→Text): 0.7913 MAP2 (Text→Image): 0.8224

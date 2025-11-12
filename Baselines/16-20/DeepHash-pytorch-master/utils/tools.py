@@ -417,6 +417,7 @@ def get_class_bank(net, device, cache_path):
 
 def make_prompt_texts(prompt: str, class_names: List[str]) -> List[str]:
     """
+    针对 class-level prompt（如“a photo of cat”）的通用构造函数
     根据 prompt 模板和类名生成文本描述。
     兼容三种情况：
       - prompt 为空：直接返回类名；
@@ -438,6 +439,40 @@ def make_prompt_texts(prompt: str, class_names: List[str]) -> List[str]:
     return [f"{p} {n}".strip() for n in class_names]
 
 
+# add 1112
+def make_prompt_for_captions(prompt: str, texts):
+    """
+    对句子列表或嵌套的词列表加 prompt，如果没有直接返回（and拼接后返回），有则将prompt作为profix返回
+        ① List[str]      → ["a photo of cat", "a photo of dog"]
+        ② List[List[str]]→ ["a photo of cat and dog", "a photo of car and road"]
+        1. 输入为嵌套关键词列表：
+            prompt = "a photo of"
+            texts = [["cat", "dog"], ["car", "road"]]
+            输出：
+                ["a photo of cat and dog", "a photo of car and road"]
+        2. 输入为句子列表：
+            prompt = "a photo of"
+            texts = ["a small cat", "a running dog"]
+            输出：
+                ["a photo of a small cat", "a photo of a running dog"]
+    """
+    if not prompt or not prompt.strip():
+        if all(isinstance(x, list) for x in texts):
+            # 嵌套关键词列表
+            return [" and ".join(inner) for inner in texts]
+        else:
+            # 普通句子列表，直接返回
+            return list(texts)
+    else:
+        p = prompt.strip()
+        if all(isinstance(x, list) for x in texts):
+            # 嵌套关键词列表：内部用 and 连接
+            return [f"{p} {' and '.join(inner)}".strip() for inner in texts]
+        else:
+            # 普通句子列表：直接加前缀
+            return [f"{p} {str(t).strip()}".strip() for t in texts]
+
+
 # add 1105
 def extract_keywords(
         text: str,
@@ -447,7 +482,7 @@ def extract_keywords(
         max_ngram: int = 2
 ) -> List[Tuple[str, float]]:
     """
-    功能：对单条文本用 KeyBERT 抽取关键词短语。
+    功能：对单条文本用 KeyBERT 抽取关键词短语
     参数：
         text: 原始 caption 文本
         kw_model: KeyBERT 实例
@@ -468,6 +503,7 @@ def extract_keywords(
         top_n=top_n
     )
 
+
 # add 1105
 def pos_filter_terms(terms: List[str], nlp) -> List[str]:
     """
@@ -482,7 +518,8 @@ def pos_filter_terms(terms: List[str], nlp) -> List[str]:
     for t in terms:
         doc = nlp(t)
         # 对短语取所有 token 的 POS，只要包含 NOUN/PROPN/ADJ 即保留
-        if any(tok.pos_ in {"NOUN", "PROPN", "ADJ"} for tok in doc):
+        if any(tok.pos_ in {"NOUN"} for tok in doc):
+            # if any(tok.pos_ in {"NOUN", "PROPN", "ADJ"} for tok in doc):
             kept.append(t)
     # 去重并保序
     seen = set()
@@ -492,6 +529,7 @@ def pos_filter_terms(terms: List[str], nlp) -> List[str]:
             uniq.append(x)
             seen.add(x)
     return uniq
+
 
 # 1105 add
 def load_filtered_captions_jsonl(jsonl_path: str):
@@ -504,7 +542,7 @@ def load_filtered_captions_jsonl(jsonl_path: str):
     if not os.path.isfile(jsonl_path):  # 没有则读到空返回
         return out
 
-    #正常读
+    # 正常读
     with open(jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -528,13 +566,13 @@ def load_filtered_captions_jsonl(jsonl_path: str):
 
 # 1105 add
 def get_filtered_captions(
-    caption_cache_path: str,
-    filtered_jsonl_path: str,
-    model_dir: str,
-    top_n: int = 4,
-    min_ngram: int = 1,
-    max_ngram: int = 2,
-    score_threshold: Optional[float] = None,
+        caption_cache_path: str,
+        filtered_jsonl_path: str,
+        model_dir: str,
+        top_n: int = 4,
+        min_ngram: int = 1,
+        max_ngram: int = 2,
+        score_threshold: Optional[float] = None,
 ):
     """
     功能：返回“过滤后的 captions（逐条一一对应的关键词列表）”，并按需写入/复用缓存：
@@ -579,20 +617,36 @@ def get_filtered_captions(
                 caps = [f"class {c}"]
 
             per_caption_terms: List[List[str]] = []
+            cls_name = labels_to_text([int(c)])[0].strip().lower()
             for cap in caps:
-                # KeyBERT 抽取
+                # 1 KeyBERT 抽取候选 (term, score)
                 pairs = extract_keywords(
                     cap, kw_model,
                     top_n=top_n, min_ngram=min_ngram, max_ngram=max_ngram
-                )  # [(term, score)]
-                # 分数阈值过滤
-                terms = [w for (w, s) in pairs if (score_threshold is None or float(s) >= float(score_threshold))]
-                # POS 过滤（传 None 则跳过）
-                filtered_terms = pos_filter_terms(terms, nlp)
-                per_caption_terms.append(filtered_terms)
+                )
+                # 2 按分数阈值过滤
+                terms = [w.strip().lower() for (w, s) in pairs if
+                         (score_threshold is None or float(s) >= float(score_threshold))]
 
-            # 一类一行写入（captions 与 filtered_captions 等长、一一对应）
-            cls_name = labels_to_text([int(c)])[0]
+                # 3 POS 过滤，仅保留名词/专有名词, 这一步摒弃了之前的 pos_filter_terms()
+                kept = []
+                for t in terms:
+                    doc = nlp(t)
+                    if any(tok.pos_ in {"NOUN", "PROPN"} for tok in doc):
+                        kept.append(t)
+
+                # 4 加上该类的类名，去重保持顺序
+                kept.append(cls_name)
+                seen = set()
+                uniq_terms = []
+                for x in kept:
+                    if x not in seen and x:
+                        uniq_terms.append(x)
+                        seen.add(x)
+
+                per_caption_terms.append(uniq_terms)
+
+                # 写入 JSONL，一类一行
             rec = {
                 "class_id": c,
                 "class_name": cls_name,
@@ -602,9 +656,8 @@ def get_filtered_captions(
             wf.write(json.dumps(rec, ensure_ascii=False) + "\n")
             results[c] = per_caption_terms
 
-    print(f"[filtered-captions] wrote {len(results)} classes to: {filtered_jsonl_path}")
+        print(f"[filtered-captions] wrote {len(results)} classes to: {filtered_jsonl_path}")
     return results
-
 
 
 def clean_save_dir_keep_best(save_dir, dataset_name):
@@ -725,7 +778,6 @@ def precompute_class_captions(
         captioner,
         caps_cache_path: str,
         captions_num: int,
-        prompt: str = "",
         device: torch.device = torch.device("cuda")
 ):
     """
@@ -733,7 +785,7 @@ def precompute_class_captions(
         - 每类生成若干 captions，并存入 jsonl。
         - 若缓存文件已存在且非空，则直接读取并返回。
     为每个类别最多采样 K 张图，按类批量 caption；写入 JSONL（{"class", "image_ids", "captions":[{"text":...}, ...]}）。
-    返回：class2caps: Dict[int, List[str]]，每类保留 K 条 captions 文本 (每个类随机挑 3个各生成 1条caption)。
+    返回：class2caps: Dict[int, List[str]]，每类保留 K 条 captions 文本 (每个类随机挑 K个各生成 1条caption)。
     """
     # 如果文件存在且非空，跳过生成并直接读
     if os.path.isfile(caps_cache_path) and os.path.getsize(caps_cache_path) > 0:
@@ -805,7 +857,7 @@ def precompute_class_captions(
 
             batch = torch.stack(picked_imgs[c], dim=0).to(device)  # [k,3,H,W]
             t0 = time.time()
-            texts, _ = captioner.generate(batch, prompt=prompt, return_scores=False)
+            texts, _ = captioner.generate(batch, return_scores=False)
             cost = time.time() - t0
             cap_texts = [str(t).strip() for t in (texts or [])]
 
@@ -827,7 +879,6 @@ def precompute_class_captions(
             print(f"[caption-precompute] class {c}: k={len(cap_texts)}, time={cost:.2f}s, text='{pick_text[:80]}'")
 
         return class2caps
-
 
 
 # ====== t-SNE ===================================================

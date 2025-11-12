@@ -68,8 +68,8 @@ def get_config():
         # 图生文
         "caption_num_beams": 1,  # 建议 ≥2 以保证 sequences_scores 可用
         "caption_max_new_tokens": 32,  # 句长上限（越大越慢）
-        "captions_num": 3,  # 固定采样数 K
-        # "caption_prompt": "a photo of a {}",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
+        "captions_num": 10,  # 固定采样数 K
+        "caption_prompt": "a photo of a {}",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
 
         # 同近异远
         "contrast_temp": 0.07,  # InfoNCE 温度
@@ -277,7 +277,6 @@ def train_val(config, bit):
         captioner=captioner,
         caps_cache_path=caps_cache_path,
         captions_num=captions_num,
-        prompt=prompt,
         device=device
     )
 
@@ -334,12 +333,12 @@ def train_val(config, bit):
         filtered_jsonl_path=filtered_jsonl_path,
         model_dir=kb_dir
     )
-    # todo 过率后的名词、形容词直接丢blip时，是否需要加提示词 a photo of ....
-    # prompt_filtered_captions = make_prompt_texts(prompt, filtered_captions)
+    #  过率后的名词加提示词 a photo of ....
+    filtered_captions_prompt = make_prompt_for_captions(prompt, filtered_captions)
 
     # 将“每条 caption 的关键词列表”拼成一句短语（"; " 连接），逐条写入负样本库
     for c in range(n_class):
-        term_lists = filtered_captions.get(c, None)
+        term_lists = filtered_captions_prompt.get(c, None)
         if term_lists and len(term_lists) > 0:
             for terms in term_lists:
                 text = "; ".join([t.strip() for t in terms if isinstance(t, str) and t.strip()])

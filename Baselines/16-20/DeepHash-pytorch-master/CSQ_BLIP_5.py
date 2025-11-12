@@ -66,8 +66,8 @@ def get_config():
         # 图生文
         "caption_num_beams": 1,  # 建议 ≥2 以保证 sequences_scores 可用
         "caption_max_new_tokens": 32,  # 句长上限（越大越慢）
-        "captions_num": 3,  # 固定采样数 K
-        # "caption_prompt": "a photo of a {}",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
+        "captions_num": 10,  # 固定采样数 K
+        "caption_prompt": "a photo of a {}",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
 
         # 同近异远
         "contrast_temp": 0.07,  # InfoNCE 温度
@@ -78,7 +78,7 @@ def get_config():
         "keybert_model_dir": r"D:\Models\all-MiniLM-L6-v2",  # Sentence-Transformers 本地目录
 
         "caption_save_path": "./data/{dataset}/captions.jsonl",  # 保存图像生成的caption文本，
-        "filtered_caps_path": "./data/{dataset}/filtered_captions.jsonl",   # 保存过滤后的caption文本，
+        "filtered_caps_path": "./data/{dataset}/filtered_captions.jsonl",  # 保存过滤后的caption文本，
         "fc_path": "./trained_mappers/image_mapper.pth",  # 若没有可注释掉加载
         "med_config": "BLIP/configs/med_config.json",
         "blip_ckpt": "./models/model_base.pth"
@@ -159,7 +159,7 @@ class BLIP_HashWrapper(nn.Module):
     @torch.no_grad()
     def encode_image_to_256(self, image):
         # 冻结 BLIP，取 CLS 再做 L2 归一化
-        vision_embeds = self.model.visual_encoder(image)   # 经过Transformer(viT)编码
+        vision_embeds = self.model.visual_encoder(image)  # 经过Transformer(viT)编码
         v256 = self.model.vision_proj(vision_embeds[:, 0, :])  # 第0个位置——>CLS 代表该图的特征 [B, 256]
         v256 = F.normalize(v256, dim=-1)
         return v256
@@ -227,6 +227,7 @@ class AlignmentLoss(nn.Module):
         super().__init__()
         self.mode = mode
         self.mse = nn.MSELoss()
+
     # forward写法比较方便后续实例化和取，v_adapt = img_adapter(v256)
     def forward(self, v_adapt, t_adapt):
         v_adapt = F.normalize(v_adapt, dim=-1)
@@ -238,7 +239,6 @@ class AlignmentLoss(nn.Module):
             return (1.0 - cos).mean()
         else:
             raise ValueError("Unsupported align mode")
-
 
 
 def train_val(config, bit):
@@ -275,7 +275,6 @@ def train_val(config, bit):
         captioner=captioner,
         caps_cache_path=caps_cache_path,
         captions_num=captions_num,
-        prompt=prompt,
         device=device
     )
 
@@ -298,7 +297,7 @@ def train_val(config, bit):
 
     # === t-SNE before training ===
     tsne_before_path = f"./data/{config['dataset']}/train_tsne_before.png"
-    if not os.path.exists(tsne_before_path): # 不存在就计算
+    if not os.path.exists(tsne_before_path):  # 不存在就计算
         feats, labs = collect_features_for_tsne(train_loader, net, device=device, max_points=4000)
         tsne_plot(feats, labs, save_path=tsne_before_path)
 
@@ -332,12 +331,13 @@ def train_val(config, bit):
         filtered_jsonl_path=filtered_jsonl_path,
         model_dir=kb_dir
     )
-    # todo 过率后的名词、形容词直接丢blip时，是否需要加提示词 a photo of ....
-    # prompt_filtered_captions = make_prompt_texts(prompt, filtered_captions)
+
+    #  过率后的名词加提示词
+    filtered_captions_prompt = make_prompt_for_captions(prompt, filtered_captions)
 
     # 将“每条 caption 的关键词列表”拼成一句短语（"; " 连接），逐条写入负样本库
     for c in range(n_class):
-        term_lists = filtered_captions.get(c, None)
+        term_lists = filtered_captions_prompt.get(c, None)
         if term_lists and len(term_lists) > 0:
             for terms in term_lists:
                 text = "; ".join([t.strip() for t in terms if isinstance(t, str) and t.strip()])
@@ -402,9 +402,9 @@ def train_val(config, bit):
 
             # —— 文本侧：从 prompt_bank 取正样本锚 —— #
             with torch.no_grad():
-                if labels.ndim == 2 and labels.size(1) == 1: # 多标签
+                if labels.ndim == 2 and labels.size(1) == 1:  # 多标签
                     y_idx = labels.view(-1).long()
-                else:           # 非多标签（单标签）
+                else:  # 非多标签（单标签）
                     y_idx = labels.argmax(dim=1).long()
 
                 # 调试更稳：用 CPU 做索引再搬回 GPU，避免 GPU 高级索引隐式同步
@@ -421,17 +421,14 @@ def train_val(config, bit):
                 v256 = net.encode_image_to_256(images)  # [B,256]
             if torch.cuda.is_available(): torch.cuda.synchronize()
 
-
             # —— 适配层与哈希头 —— #
 
             v_adapt = net.img_adapter(v256)  # [B,256]
             t_adapt = net.text_adapter(t256)  # [B,256]
             if torch.cuda.is_available(): torch.cuda.synchronize()
 
-
             u = net.mapper(v_adapt)  # [B,bit]
             if torch.cuda.is_available(): torch.cuda.synchronize()
-
 
             # —— 损失 —— #
             # fc1 fc2 的结果做对齐，而不是fc1 fc2网络结构对齐
@@ -444,7 +441,7 @@ def train_val(config, bit):
 
             #   正样本对及正样本对的对比logits
             pos_vecs = prompt_bank[y_idx]
-            pos_logits = (img_feats * pos_vecs).sum(dim=1, keepdim=True) / tau   # [B,1] 图像与正样本相似度
+            pos_logits = (img_feats * pos_vecs).sum(dim=1, keepdim=True) / tau  # [B,1] 图像与正样本相似度
 
             if caption_bank.size(0) > 0:
                 # caption_bank数据集所有类的编码结果  neg_cls_ids 与caption_bank对应的类别 ID 向量
@@ -465,16 +462,14 @@ def train_val(config, bit):
                 targets = torch.zeros(logits.size(0), dtype=torch.long, device=device)
 
                 # 图像→文本 对比损失 (单向 InfoNCE)
-                contrast_loss  = F.cross_entropy(logits, targets)
+                contrast_loss = F.cross_entropy(logits, targets)
             else:
                 # 若 caption_bank<=0 为空（例如首次运行或无 caption）, 不计算对比损失
                 contrast_loss = torch.tensor(0.0, device=device)
 
             if torch.cuda.is_available(): torch.cuda.synchronize()
 
-
             total_loss = csq_loss + align_weight * align_loss + beta * id_loss + contrast_weight * contrast_loss
-
 
             total_loss.backward()
 
@@ -482,14 +477,12 @@ def train_val(config, bit):
             optimizer.step()
             if torch.cuda.is_available(): torch.cuda.synchronize()
 
-
             # —— 统计 —— #
             train_loss += total_loss.item()
             csq_loss_meter += csq_loss.item()
             align_loss_meter += align_loss.item()
             id_loss_meter += id_loss.item()
             contrast_loss_meter += contrast_loss.item()
-
 
         # 统计并打印 每个 batch 的 loss 会抖动,把整轮（epoch）里所有 batch 的 loss 求平均
         n_iter = len(train_loader)  # batch 数
@@ -537,7 +530,7 @@ def train_val(config, bit):
 
     # === t-SNE after training ===
     tsne_after_path = f"./data/{config['dataset']}/train_tsne_after.png"
-    if not os.path.exists(tsne_after_path): # 不存在时才tsne
+    if not os.path.exists(tsne_after_path):  # 不存在时才tsne
         feats, labs = collect_features_for_tsne(train_loader, net, device=device, max_points=4000)
         tsne_plot(feats, labs, save_path=tsne_after_path)
 
