@@ -40,14 +40,15 @@ def get_config():
         "crop_size": 224,
         "batch_size": 64,
         "net": build_blip_net,
-        # "dataset": "cifar10",
         "dataset": "coco",
         "epoch": 120,
-        "test_map": 30,
+        "eval_switch_epoch": 60,  # 前60轮 → test_map_1；后60轮 → test_map_2
+        "test_map_1": 30,  # 前半段评估间隔
+        "test_map_2": 10,  # 后半段评估间隔
         "device": torch.device("cuda:0"),
         "bit_list": [64],
         "save_path": "save/CSQ_BLIP_2",
-        # "image_root": r"D:\Datasets\cifar10-image",
+        # "cifar10_dir": r"D:\Datasets\cifar10-image",  # 后续将实际数据路径设置在 image_root 中 方便统一修改
         "image_root": r"D:\Datasets\coco2017",
 
         # —— 跨模态对齐控制 —— #
@@ -69,6 +70,8 @@ def get_config():
     }
     config = config_dataset(config)
     return config
+#  —— CIFAR-10 类名
+CIFAR10_LABELS = ["airplane", "automobile", "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"]
 
 
 class FeatureMapper(nn.Module):
@@ -125,7 +128,7 @@ class BLIP_HashWrapper(nn.Module):
             self.mapper.load_state_dict(
                 torch.load(fc_path, map_location=torch.device('cuda' if torch.cuda.is_available() else 'cpu')))
 
-        # 文本侧编码器（你在 to_vector.py 里已完成）
+        # 文本编码器（你在 to_vector.py 里已完成）
         self.text_encoder = build_text_encoder(model_dir=blip_dir, proj_dim=text_proj_dim,
                                                device="cuda" if torch.cuda.is_available() else "cpu")
         for p in self.text_encoder.parameters():
@@ -135,8 +138,8 @@ class BLIP_HashWrapper(nn.Module):
     @torch.no_grad()
     def encode_image_to_256(self, image):
         # 冻结 BLIP，取 CLS 再做 L2 归一化
-        vision_embeds = self.model.visual_encoder(image)
-        v256 = self.model.vision_proj(vision_embeds[:, 0, :])  # [B, 256]
+        vision_embeds = self.model.visual_encoder(image)  # 经过Transformer(viT)编码
+        v256 = self.model.vision_proj(vision_embeds[:, 0, :])  # 第0个位置——>CLS 代表该图的特征 [B, 256]
         v256 = F.normalize(v256, dim=-1)
         return v256
 
@@ -157,6 +160,8 @@ class CSQLoss(torch.nn.Module):
         self.hash_targets = self.get_hash_targets(config["n_class"], bit).to(config["device"])
         self.multi_label_random_center = torch.randint(2, (bit,)).float().to(config["device"])
         self.criterion = torch.nn.BCELoss().to(config["device"])
+        self.last_center_loss = 0.0
+        self.last_q_loss = 0.0
 
     def forward(self, u, y, ind, config):
         # u 连续 -> tanh 压到 (-1,1)，与中心的二值(-1/1)做 BCE（映射到[0,1]）
@@ -164,6 +169,8 @@ class CSQLoss(torch.nn.Module):
         hash_center = self.label2center(y)
         center_loss = self.criterion(0.5 * (u + 1), 0.5 * (hash_center + 1))
         Q_loss = (u.abs() - 1).pow(2).mean()
+        self.last_center_loss = center_loss.item()
+        self.last_q_loss = Q_loss.item()
         return center_loss + config["lambda"] * Q_loss
 
     def label2center(self, y):
@@ -197,13 +204,14 @@ class CSQLoss(torch.nn.Module):
         return hash_targets
 
 
-# —— 对齐损失（发生在 img_adapter(v256) ↔ t256）—— #
+# —— 对齐损失（发生在 img_adapter(v256) ↔ t_adapt）—— #
 class AlignmentLoss(nn.Module):
     def __init__(self, mode="mse"):
         super().__init__()
         self.mode = mode
         self.mse = nn.MSELoss()
 
+    # forward写法比较方便后续实例化和取，v_adapt = img_adapter(v256)
     def forward(self, v_adapt, t_adapt):
         v_adapt = F.normalize(v_adapt, dim=-1)
         t_adapt = F.normalize(t_adapt, dim=-1)
@@ -233,21 +241,23 @@ def train_val(config, bit):
     base_optim = config["optimizer"]
     base_lr = base_optim["optim_params"].get("lr", 1e-5)
     ta_mult = config.get("text_adapter_lr_mult", 0.5)
+    # 只找params中的最优解
     params = [
         {"params": net.img_adapter.parameters(), "lr": base_lr},  # fc1
         {"params": net.mapper.parameters(), "lr": base_lr},  # hash head
         {"params": net.text_adapter.parameters(), "lr": base_lr * ta_mult},  # ★ fc2 稍低 lr 更稳
     ]
     optimizer = base_optim["type"](params, **{k: v for k, v in base_optim["optim_params"].items() if k != "lr"})
-    # optimizer = config["optimizer"]["type"](net.parameters(), **(config["optimizer"]["optim_params"]))
+
+    # 初始化loss对象
     csq_criterion = CSQLoss(config, bit)
     align_criterion = AlignmentLoss(mode=config.get("align_mode", "mse"))
     align_weight = float(config.get("align_weight", 1.0))
     beta = float(config.get("text_anchor_weight", 0.05))
 
     # 扫描当前 save/算法名/ 文件夹，找到得分最高（mAP 最大）的一组前缀，然后删除其余所有 .pt 和 .npy 文件，只保留那一组
-    if "save_path" in config:
-        clean_save_dir_keep_best(config["save_path"], config["dataset"])
+    # if "save_path" in config:
+    #     clean_save_dir_keep_best(config["save_path"], config["dataset"])
     Best_mAP = 0
     # 预编码类文本向量,
     # 单标签：t256 = class_bank[y_idx]
@@ -255,48 +265,56 @@ def train_val(config, bit):
     is_single_label = config["dataset"] not in {"nuswide_21", "nuswide_21_m", "coco"}
     print("is_single_label:", is_single_label)
     # class_bank存储向量化后的class names ['person', 'bicycle', ...]
-    class_bank = get_class_bank(net, device, cache_path="data/coco/class_bank.pt")
+    class_bank = get_class_bank(net, device, config, cache_path="data/coco/class_bank.pt")
 
     for epoch in range(config["epoch"]):
         current_time = time.strftime('%H:%M:%S', time.localtime(time.time()))
-        # print("%s[%2d/%2d][%s] bit:%d, dataset:%s, training...." % (
-        #     config["info"], epoch + 1, config["epoch"], current_time, bit, config["dataset"]), end="")
+        # —— 动态评估间隔 —— #
+        if epoch < config["eval_switch_epoch"]:
+            eval_interval = config["test_map_1"]
+        else:
+            eval_interval = config["test_map_2"]
 
         net.train()
         train_loss = 0.0
         csq_loss_meter = 0.0
+        center_loss_meter = 0.0
+        q_loss_meter = 0.0
         align_loss_meter = 0.0
         id_loss_meter = 0.0
 
-        for image, label, ind, paths in train_loader:
-            image = image.to(device)  # [B,3,H,W]
-            if isinstance(label, np.ndarray):
-                label = torch.from_numpy(label)
-            label = label.to(device).float()  # [B, n_class] Tensor[64, 80]
+        for images, labels, ind, paths in train_loader:
+            # ====== 进入一个 batch ======
+            # —— 搬到 GPU —— #
+            images = images.to(device)  # [B,3,H,W]
+            if isinstance(labels, np.ndarray):
+                labels = torch.from_numpy(labels)
+            labels = labels.to(device).float()  # [B, n_class] Tensor[64, 80]
 
             # —— 文本侧：从 class_bank 构造 t256 —— #
             with torch.no_grad():
                 if is_single_label:
-                    y_idx = torch.argmax(label, dim=1)  # [B] Tensor[64]
+                    y_idx = torch.argmax(labels, dim=1)  # [B] Tensor[64]
                     t256 = class_bank[y_idx]  # [B,256]
-                    t256 =F.normalize(t256, dim=-1)
+                    t256 = F.normalize(t256, dim=-1)
                 else:
                     # 多标签：每张图有多个正类 → 对这些类的向量取均值
                     t_list = []
-                    for b in range(label.size(0)):
-                        ids = torch.where(label[b] > 0.5)[0]  # 当前样本的正类索引
+                    for b in range(labels.size(0)):
+                        ids = torch.where(labels[b] > 0.5)[0]  # 当前样本的正类索引
                         if ids.numel() == 0:  # 没有正类则取 argmax 回退
-                            ids = torch.argmax(label[b]).view(1)
+                            ids = torch.argmax(labels[b]).view(1)
                         t_i = class_bank[ids].mean(dim=0, keepdim=True)  # 取这些类向量的均值
-                        t_i = F.normalize(t_i, dim=-1) # 均值操作会破坏单位长度, 多标签平均后再单位化
+                        t_i = F.normalize(t_i, dim=-1)  # 均值操作会破坏单位长度, 多标签平均后再单位化
                         t_list.append(t_i)
                     t256 = torch.cat(t_list, dim=0)  # [B,256]
 
+            # —— 清梯度，防止梯度累计—— #
             optimizer.zero_grad()
 
             # —— 视觉侧：取冻结的 v256；通过 img_adapter（可训练）得到 v_adapt(fc1)—— #
             with torch.no_grad():
-                v256 = net.encode_image_to_256(image)  # [B,256] 冻结 BLIP
+                v256 = net.encode_image_to_256(images)  # [B,256] 冻结 BLIP
             v_adapt = net.img_adapter(v256)  # [B,256] ★ 可训练分支
 
             # 文本侧适配：fc2
@@ -305,19 +323,25 @@ def train_val(config, bit):
             # —— 哈希向量（bit）（可训练）—— #
             u = net.mapper(v_adapt)  # [B,bit]
 
-            # 损失
+            # —— 损失 —— #
+            # fc1 fc2 的结果做对齐，而不是fc1 fc2网络结构对齐
             align_loss = align_criterion(v_adapt, t_adapt)
-
+            # 让t_adapt和 t256的乘积最小——>最相似
             # —— 总损失：CSQ(u, y) + α·align(fc1, fc2) + β·id_loss —— #
             id_loss = F.mse_loss(F.normalize(t_adapt, dim=-1), t256)  # 文本锚定正则：防止 fc2 远离原始 t256 语义
-            csq_loss = csq_criterion(u, label, ind, config)
+            csq_loss = csq_criterion(u, labels, ind, config)
             total_loss = csq_loss + align_weight * align_loss + beta * id_loss
 
             total_loss.backward()
+
+            # 优化器：获取最优解
             optimizer.step()
 
+            # —— 统计 —— #
             train_loss += total_loss.item()
             csq_loss_meter += csq_loss.item()
+            center_loss_meter += csq_criterion.last_center_loss
+            q_loss_meter += csq_criterion.last_q_loss
             align_loss_meter += align_loss.item()
             id_loss_meter += id_loss.item()
 
@@ -325,17 +349,21 @@ def train_val(config, bit):
         n_iter = len(train_loader)  # batch 数
         train_loss_avg = train_loss / n_iter
         csq_loss_avg = csq_loss_meter / n_iter
+        center_loss_avg = center_loss_meter / n_iter
+        q_loss_avg = q_loss_meter / n_iter
         align_loss_avg = align_loss_meter / n_iter
         id_loss_avg = id_loss_meter / n_iter
-        lr = optimizer.param_groups[0].get("lr", None)
-        lr_str = f"{lr:.1e}" if lr is not None else "NA"
-        print(f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
-              f"bit:{bit}, dataset:{config['dataset']}, "
-              f"loss:{train_loss_avg:.3f} "
-              f"(csq:{csq_loss_avg:.3f}, align:{align_loss_avg:.3f}, id:{id_loss_avg:.3f}, "
-              f"α={align_weight:.2f}, β={beta:.2f}, mode:{config.get('align_mode', 'mse')})")
+
+        print(
+            f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
+            f"bit:{bit}, dataset:{config['dataset']}, "
+            f"total loss:{train_loss_avg:.3f} = "
+            f"CSQ:{csq_loss_avg:.3f} (L_C:{center_loss_avg:.3f} + L_Q:{q_loss_avg:.3f}) "
+            f"+ Align:{align_loss_avg:.3f} + ID:{id_loss_avg:.3f} "
+            f"(α={align_weight:.2f}, β={beta:.2f}, mode:{config.get('align_mode', 'mse')})"
+        )
         # 评估与保存
-        if (epoch + 1) % config["test_map"] == 0:
+        if (epoch + 1) % eval_interval == 0:
             tst_binary, tst_label = compute_result(test_loader, net, device=device)
             trn_binary, trn_label = compute_result(dataset_loader, net, device=device)
             mAP = CalcTopMap(trn_binary.numpy(), tst_binary.numpy(), trn_label.numpy(), tst_label.numpy(),
@@ -360,7 +388,6 @@ def train_val(config, bit):
                     # torch.save(net.state_dict(), os.path.join(save_path, f"{filename_prefix}-model.pt"))
             print("%s epoch:%d, bit:%d, dataset:%s, MAP:%.3f, Best MAP: %.3f" % (
                 config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))
-            # print(config)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import os
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 scripts = [
-    os.path.join(BASE, "CSQ_BLIP_3.py"),
+    # os.path.join(BASE, "CSQ_BLIP_3.py"),
     os.path.join(BASE, "CSQ_BLIP_4.py"),
     os.path.join(BASE, "CSQ_BLIP_5.py"),
 ]

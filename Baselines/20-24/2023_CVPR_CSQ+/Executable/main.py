@@ -1,4 +1,5 @@
 from scripts.train_CUB import *
+from scripts.utils import *
 import numpy as np
 
 if __name__ == '__main__':
@@ -15,9 +16,9 @@ if __name__ == '__main__':
         setup_seed(config['seed'])
         config["center_path"] = f"./centerswithoutVar/CSQ_init_{flag}_{config['n_class']}_{bit}.npy"
         config["CSQ_center"] = f"./CSQcenters/CSQ_{config['n_class']}_{bit}.npy"
-        config["remarks"] = "Ours"
+        config["remarks"] = "CSQ+"
         config["save_path"] = f"./results/{config['dataset']}/{config['remarks']}"
-        config["save_center"] = f"./results/{config['dataset']}/{config['remarks']}/ours_{bit}.npy"
+        config["save_center"] = f"./results/{config['dataset']}/{config['remarks']}/CSQ+_{bit}.npy"
         config["info"] = f"[{config['remarks']}]"
         config["loss_way"] = f"{config['remarks']}"
         # logger.add(f'logs/{config["dataset"]}/{config["info"]}/{bit}.log',

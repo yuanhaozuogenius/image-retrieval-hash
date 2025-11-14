@@ -10,4 +10,4 @@ python train.py \
   --R 5000 \
   --batch_size 64 \
   --hash_bit 64 \
-  --start_test_epoch 30
+  --start_test_epoch 10

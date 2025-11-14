@@ -48,7 +48,9 @@ def get_config():
         # "dataset": "nuswide_21",
         # "dataset": "nuswide_21_m",
         "epoch": 80,
-        "test_map": 40,
+        "eval_switch_epoch": 40,  # 前60轮 → test_map_1；后60轮 → test_map_2
+        "test_map_1": 20,  # 前半段评估间隔
+        "test_map_2": 10,  # 后半段评估间隔
         # "device":torch.device("cpu"),
         "device": torch.device("cuda:0"),
         "bit_list": [64],
@@ -136,6 +138,11 @@ def train_val(config, bit):
 
     for epoch in range(config["epoch"]):
 
+        # —— 动态评估间隔 —— #
+        if epoch < config["eval_switch_epoch"]:
+            eval_interval = config["test_map_1"]
+        else:
+            eval_interval = config["test_map_2"]
         current_time = time.strftime('%H:%M:%S', time.localtime(time.time()))
 
         print("%s[%2d/%2d][%s] bit:%d, dataset:%s, training...." % (
@@ -162,7 +169,7 @@ def train_val(config, bit):
         print("\b\b\b\b\b\b\b loss:%.3f" % (train_loss))
 
         # 正常评估时机（每 test_map 轮）
-        if (epoch + 1) % config["test_map"] == 0:
+        if (epoch + 1) % eval_interval == 0:
             # print("calculating test binary code......")
             tst_binary, tst_label = compute_result(test_loader, net, device=device)
 

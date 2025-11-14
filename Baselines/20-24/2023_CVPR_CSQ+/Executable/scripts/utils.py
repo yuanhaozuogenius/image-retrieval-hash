@@ -49,8 +49,10 @@ def get_config():
         "dataset": "coco",
         # "dataset": "cifar10-1",
         "without_BN": False,
-        "epoch": 100,
-        "test_map": 5,
+        "epoch": 120,
+        "eval_switch_epoch": 60,  # 前60轮 → test_map_1；后60轮 → test_map_2
+        "test_map_1": 30,  # 前半段评估间隔
+        "test_map_2": 10,  # 后半段评估间隔
         "stop_iter": 10,
         # "save_path": "./results/imagenet/OurLossWithPair",
         # "center_path": "./centerswithoutVar/CSQ_init_True_100_64.npy"

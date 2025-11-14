@@ -47,7 +47,9 @@ def get_config():
         "net": build_blip_net,
         "dataset": "coco",
         "epoch": 120,
-        "test_map": 40,
+        "eval_switch_epoch": 60,  # 前60轮 → test_map_1；后60轮 → test_map_2
+        "test_map_1": 30,  # 前半段评估间隔
+        "test_map_2": 10,  # 后半段评估间隔
         "device": torch.device("cuda:0"),
         "bit_list": [64],
         "save_path": "save/CSQ_BLIP_4",
@@ -75,6 +77,7 @@ def get_config():
 
         # —— 相对路径—— #
         "blip_dir": r"D:\Models\blip2-opt-2.7b",
+        "all_train_data": r"./data/{dataset}/train_all.txt",
         "caption_save_path": "./data/{dataset}/captions.jsonl",  # 保存图像生成的caption文本，
         "fc_path": "./trained_mappers/image_mapper.pth",  # 若没有可注释掉加载
         "med_config": "BLIP/configs/med_config.json",
@@ -84,6 +87,7 @@ def get_config():
 
     # 将 {dataset} 替换为真实数据集名
     config["caption_save_path"] = config.get("caption_save_path").replace("{dataset}", config["dataset"])
+    config["all_train_data"] = config.get("all_train_data").replace("{dataset}", config["dataset"])
     return config
 
 
@@ -177,6 +181,8 @@ class CSQLoss(torch.nn.Module):
         self.hash_targets = self.get_hash_targets(config["n_class"], bit).to(config["device"])
         self.multi_label_random_center = torch.randint(2, (bit,)).float().to(config["device"])
         self.criterion = torch.nn.BCELoss().to(config["device"])
+        self.last_center_loss = 0.0
+        self.last_q_loss = 0.0
 
     def forward(self, u, y, ind, config):
         # u 连续 -> tanh 压到 (-1,1)，与中心的二值(-1/1)做 BCE（映射到[0,1]）
@@ -184,6 +190,8 @@ class CSQLoss(torch.nn.Module):
         hash_center = self.label2center(y)
         center_loss = self.criterion(0.5 * (u + 1), 0.5 * (hash_center + 1))
         Q_loss = (u.abs() - 1).pow(2).mean()
+        self.last_center_loss = center_loss.item()
+        self.last_q_loss = Q_loss.item()
         return center_loss + config["lambda"] * Q_loss
 
     def label2center(self, y):
@@ -241,6 +249,7 @@ def train_val(config, bit):
     device = config["device"]
     train_loader, test_loader, dataset_loader, num_train, num_test, num_dataset = get_data(config)
     config["num_train"] = num_train
+    n_class = config.get("n_class") or count_labels_nums()
 
     # 图生文 captioner（仅推理）
     captioner = build_image_captioner(
@@ -251,30 +260,21 @@ def train_val(config, bit):
     )
 
     # ———— Caption 缓存路径与初始化 ———— #
-    # 从 JSONL 缓存加载按类缓存的“唯一 caption”（若不存在则为空）
-    caps_cache_path = config.get("caption_save_path")
-    os.makedirs(os.path.dirname(caps_cache_path), exist_ok=True)
-    if not os.path.isfile(caps_cache_path):
-        with open(caps_cache_path, "w", encoding="utf-8") as f:
-            pass
-        print(f"[caption-cache] init empty cache at: {caps_cache_path}")
-    else:
-        print(f"[caption-cache] found cache: {caps_cache_path}")
-
     # ———— 训练前一次性预生成类级 captions ———— #
-    captions_num = int(config.get("captions_num", 3))
-    prompt = config.get("caption_prompt", "")
-
-    # 在训练前先遍历一遍所有数据
     class2caps = precompute_class_captions(
-        train_loader=train_loader,
         captioner=captioner,
-        caps_cache_path=caps_cache_path,
-        captions_num=captions_num,
+        config=config,
         device=device
     )
-
-    class2caps_prompt = make_prompt_for_captions(prompt, class2caps)
+    prompt = config.get("caption_prompt", "")
+    # 容器：用于保存所有类的 prompt 后 captions
+    class2caps_prompt = {}
+    for c in range(n_class):
+        captions = class2caps.get(c, None)  # 取该类原始 caption 列表（list[str]）
+        # if not captions: #
+        #     continue
+        prompted_caps = make_prompt_for_captions(prompt, captions)
+        class2caps_prompt[c] = prompted_caps
 
     # 释放 captioner 显存
     if torch.cuda.is_available():
@@ -293,7 +293,6 @@ def train_val(config, bit):
                         blip_dir=config.get("blip_dir", config.get("model_dir", r"D:\Models\blip2-opt-2.7b")),
                         ).to(device)
 
-    n_class = config.get("n_class") or count_labels_nums()
     # print(f"[caption-cache] loaded {len(class2cap)} classes from {caps_cache_path}")
 
     # ========= 构建 Prompt/Caption 两个文本库（bank） =========
@@ -303,7 +302,7 @@ def train_val(config, bit):
         if str(config.get("dataset", "")).lower() in ["cifar10", "cifar-10"]:
             class_names = CIFAR10_LABELS
         else:
-            class_names = labels_to_text(list(range(n_class)))  # 获取class names ['person', 'bicycle', ...]
+            class_names = labels_to_text(list(range(n_class)), dataset=config["dataset"])
 
     # 2) Prompt bank（正样本锚等于类名或者类名直接拼接而成的prompts）：每类 1 条 prompt
     prompt_texts = make_prompt_texts(prompt, class_names)
@@ -361,9 +360,17 @@ def train_val(config, bit):
     for epoch in range(config["epoch"]):
 
         current_time = time.strftime('%H:%M:%S', time.localtime(time.time()))
+        # —— 动态评估间隔 —— #
+        if epoch < config["eval_switch_epoch"]:
+            eval_interval = config["test_map_1"]
+        else:
+            eval_interval = config["test_map_2"]
+
         net.train()
         train_loss = 0.0
         csq_loss_meter = 0.0
+        center_loss_meter = 0.0
+        q_loss_meter = 0.0
         align_loss_meter = 0.0
         id_loss_meter = 0.0
         contrast_loss_meter = 0.0
@@ -458,6 +465,8 @@ def train_val(config, bit):
             # —— 统计 —— #
             train_loss += total_loss.item()
             csq_loss_meter += csq_loss.item()
+            center_loss_meter += csq_criterion.last_center_loss
+            q_loss_meter += csq_criterion.last_q_loss
             align_loss_meter += align_loss.item()
             id_loss_meter += id_loss.item()
             contrast_loss_meter += contrast_loss.item()
@@ -466,20 +475,22 @@ def train_val(config, bit):
         n_iter = len(train_loader)  # batch 数
         train_loss_avg = train_loss / n_iter
         csq_loss_avg = csq_loss_meter / n_iter
+        center_loss_avg = center_loss_meter / n_iter
+        q_loss_avg = q_loss_meter / n_iter
         align_loss_avg = align_loss_meter / n_iter
         id_loss_avg = id_loss_meter / n_iter
         contrast_loss_avg = contrast_loss_meter / n_iter
 
-        lr = optimizer.param_groups[0].get("lr", None)
-        lr_str = f"{lr:.1e}" if lr is not None else "NA"
-        print(f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
-              f"bit:{bit}, dataset:{config['dataset']}, lr:{lr_str}, "
-              f"loss:{train_loss_avg:.3f} "
-              f"(csq:{csq_loss_avg:.3f}, align:{align_loss_avg:.3f}, id:{id_loss_avg:.3f}, "
-              f"contrast:{contrast_loss_avg:.3f}, α={align_weight:.2f}, β={beta:.2f}, λ={contrast_weight:.2f}, τ={tau:.2f}, "
-              f"mode:{config.get('align_mode', 'mse')})")
+        print(
+            f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
+            f"bit:{bit}, dataset:{config['dataset']}, "
+            f"total loss:{train_loss_avg:.3f} = "
+            f"CSQ:{csq_loss_avg:.3f} (L_C:{center_loss_avg:.3f} + L_Q:{q_loss_avg:.3f}) "
+            f"+ Align:{align_loss_avg:.3f} + ID:{id_loss_avg:.3f} + Contrast:{contrast_loss_avg:.3f} "
+            f"(α={align_weight:.2f}, β={beta:.2f}, λ={contrast_weight:.2f}, τ={tau:.2f}, mode:{config.get('align_mode', 'mse')})"
+        )
         # 评估与保存
-        if (epoch + 1) % config["test_map"] == 0:
+        if (epoch + 1) % eval_interval == 0:
             tst_binary, tst_label = compute_result(test_loader, net, device=device)
             trn_binary, trn_label = compute_result(dataset_loader, net, device=device)
             mAP = CalcTopMap(trn_binary.numpy(), tst_binary.numpy(), trn_label.numpy(), tst_label.numpy(),

@@ -36,7 +36,9 @@ def get_config():
         # "dataset": "nuswide_21_m",
         # "dataset": "nuswide_81_m",
         "epoch": 120,
-        "test_map": 40,
+        "eval_switch_epoch": 60,  # 前60轮 → test_map_1；后60轮 → test_map_2
+        "test_map_1": 30,  # 前半段评估间隔
+        "test_map_2": 10,  # 后半段评估间隔
         # "save_path": "Results/DSH/",
         "save_path": "save/DSH/",
         # "device":torch.device("cpu"),
@@ -83,7 +85,11 @@ def train_val(config, bit):
     Best_mAP = 0
 
     for epoch in range(config["epoch"]):
-
+        # —— 动态评估间隔 —— #
+        if epoch < config["eval_switch_epoch"]:
+            eval_interval = config["test_map_1"]
+        else:
+            eval_interval = config["test_map_2"]
         current_time = time.strftime('%H:%M:%S', time.localtime(time.time()))
 
         print("%s[%2d/%2d][%s] bit:%d, dataset:%s, training...." % (
@@ -109,7 +115,7 @@ def train_val(config, bit):
 
         print("\b\b\b\b\b\b\b loss:%.3f" % (train_loss))
 
-        if (epoch + 1) % config["test_map"] == 0:
+        if (epoch + 1) % eval_interval == 0:
             # print("calculating test binary code......")
             tst_binary, tst_label = compute_result(test_loader, net, device=device)
 
@@ -140,7 +146,6 @@ def train_val(config, bit):
             print("%s epoch:%d, bit:%d, dataset:%s, MAP:%.3f, Best MAP: %.3f" % (
                 config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))
             print(config)
-
 
 
 if __name__ == "__main__":

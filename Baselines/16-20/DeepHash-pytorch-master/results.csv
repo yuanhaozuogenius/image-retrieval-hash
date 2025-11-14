@@ -1,17 +1,17 @@
 Dataset,Method,64Bit,128Bit,Remark
 COCO,DHN,0.690,
-COCO,DSH,0.675,
-COCO,Orthohash,0.6858
-COCO,LSCSH,0.7913 ,,MAP1 (Image→Text): 0.7913 MAP2 (Text→Image): 0.8224
-COCO,SPRCH,0.722,, topk : -1  Avg Loss: 0.2118  r²=0.804
-COCO,CSQ,0.892,,40次就收敛了: [CSQ] epoch:40 Best MAP: 0.892  epoch:80 Best MAP: 0.892
-COCO,CSQ+,0.8876,,0.7911(car_ims  net:resnet)
-COCO,CSQ_BLIP,,,blip net
-COCO,CSQ_BLIP_2,,,align loss + label to text encoder
-COCO,CSQ_BLIP_3,0.921(0.923 without prompts),,align loss + captions to text encoder
-COCO,CSQ_BLIP_4,0.914(0.923),,align loss + contrast loss + captions to text encoder
-COCO,CSQ_BLIP_5,0.923(0.921),,align loss + contrast loss + filtered captions to text encoder
-COCO,CSQ_BLIP_6,0.867,,align loss + contrast loss + csq+ loss + filtered captions to text encoder(可能縮小了通用性)
+COCO,DSH,0.656,
+COCO,Orthohash,0.6932
+COCO,LSCSH, ,,MAP1 (Image→Text): 0.7913 MAP2 (Text→Image): 0.8224
+COCO,SPRCH,0.836,,r²=0.674 Avg Loss: 0.2147
+COCO,CSQ,0.852,,
+COCO,CSQ+,0.7936,,0.7911(car_ims  net:resnet)
+COCO,CSQ_BLIP,0.835,,blip net
+COCO,CSQ_BLIP_2,0.899,,align loss + label to text encoder
+COCO,CSQ_BLIP_3,0.902,,align loss + captions to text encoder   loss:0.406
+COCO,CSQ_BLIP_4,,,align loss + contrast loss + captions to text encoder
+COCO,CSQ_BLIP_5,,,align loss + contrast loss + filtered captions to text encoder
+COCO,CSQ_BLIP_6,,,align loss + contrast loss + csq+ loss + filtered captions to text encoder(可能縮小了通用性)
 
 
 CIFAR10,DHN,0.7820,

@@ -5,7 +5,9 @@
 1. 跑`optimAccel.py`  修改bit, n_class  
 2. 检查`utils.py`、`train_CUB.py`  
 3. 运行`main.py` 
-
+4. `online_loader.py` 修改map topK, `utils.py`修改运行参数
+4. 开启动态评估 前50轮 → test_map_1；后50轮 → test_map_2
+5. 开启提前结束，若连续stop_iter次都没有提升 mAP → 认为模型不再提升 → 触发早停
 
 ### Code
 

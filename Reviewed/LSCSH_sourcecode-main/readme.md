@@ -79,7 +79,7 @@ ex: coco_bert768_word2vec.pkl
 <h5>添加脚本运行权限</h5>
 chmod +x run_cifar10.sh  
 若设置为run config中启动 需要配置command option =
-`--data_path D:/Datasets/coco2017 --data_name coco --word2vec_file ../data/coco/coco_bert768_word2vec.pkl --epochs 90 --fixed_weight --center_update --R 5000 --batch_size 64 --hash_bit 64 --start_test_epoch 30`  
+`--data_path D:/Datasets/coco2017 --data_name coco --word2vec_file ../data/coco/coco_bert768_word2vec.pkl --epochs 120 --fixed_weight --center_update --R 5000 --batch_size 64 --hash_bit 64 --start_test_epoch 10`  
 working directory =`LSCSH_sourcecode-main\src`
 
 Best map in paper : 0.882 net: MS-COCO 64bits   

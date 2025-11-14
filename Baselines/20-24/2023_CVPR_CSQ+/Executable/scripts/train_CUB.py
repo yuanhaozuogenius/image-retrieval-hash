@@ -2,6 +2,7 @@ from loss.ourLoss import OurLoss
 from scripts.head import *
 from scripts.utils import CalcTopMap, compute_result, pr_curve
 
+
 # writer = SummaryWriter()
 
 
@@ -50,6 +51,11 @@ def train_val(config, bit, l):
     start_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
 
     for epoch in range(config['epoch']):
+        # —— 动态评估间隔 —— #
+        if epoch < config["eval_switch_epoch"]:
+            eval_interval = config["test_map_1"]
+        else:
+            eval_interval = config["test_map_2"]
         current_time = time.strftime("%H:%M:%S", time.localtime(time.time()))
         logger.info(
             f"{config['info']} {epoch + 1}/{config['epoch']} {current_time} bits: {bit} dataset: {config['dataset']} loss way: {config['loss_way']} training...")
@@ -64,7 +70,7 @@ def train_val(config, bit, l):
             label = label.cuda()  # label 64x10的onehot函数标签
             optimizer.zero_grad()
 
-            u1, u2 = net(img, None, None) # u1 对应的哈希映射结果(64x64) u2 feature
+            u1, u2 = net(img, None, None)  # u1 对应的哈希映射结果(64x64) u2 feature
             # loss, center_loss, pair_loss = criterion(u1, u2, label, ind, epoch)
             loss, center_loss, pair_loss, q_loss = criterion(u1, label)
             if config['n_gpu'] > 1:
@@ -83,10 +89,11 @@ def train_val(config, bit, l):
             optimizer.step()
 
         train_loss /= len(train_loader)
-        logger.info(f"train loss: {train_loss}, center loss: {train_center_loss}, pair loss: {train_pair_loss}, quantization loss: {train_q_loss}")
+        logger.info(
+            f"train loss: {train_loss}, center loss: {train_center_loss}, pair loss: {train_pair_loss}, quantization loss: {train_q_loss}")
         # writer.add_scalar('train_loss', train_loss, epoch)
 
-        if (epoch + 1) % config['test_map'] == 0:
+        if (epoch + 1) % eval_interval == 0:
             net.eval()
             tst_binary, tst_label = compute_result(test_loader, net, config['device'], None, None)
             trn_binary, trn_label = compute_result(database_loader, net, config['device'], None, None)
@@ -101,13 +108,13 @@ def train_val(config, bit, l):
                     #     os.makedirs(config['save_path'])
                     logger.info(f'save in ./results/{config["dataset"]}/{config["loss_way"]}')
             else:
-                if count == config['stop_iter']:
+                if count == config['stop_iter']: # 若连续 stop_iter 次都没有提升 mAP → 认为模型不再提升 → 触发早停
                     logger.info(f"valid mAP: {Best_map}")
                     end_time = time.strftime("%H:%M:%S", time.localtime(time.time()))
                     # with open(f'./results/{config["dataset"]}/{config["loss_way"]}/map_result.txt', 'a') as f:
                     #     f.write(str(bit) + '\t' + 'valid: ' + str(Best_map) + '\t' + 'start time: ' + str(start_time) +
                     #             '\t' + 'end_time:' + str(end_time) + '\t' + str(config) + '\n')
-                    # break
+                    break
                 count += 1
             logger.info(
                 f"{config['info']} {epoch + 1}/{config['epoch']} {current_time} bits: {bit} dataset: {config['dataset']} Best mAP: {Best_map}, current mAP: {mAP}")

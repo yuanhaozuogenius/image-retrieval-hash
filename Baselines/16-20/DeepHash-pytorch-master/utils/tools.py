@@ -305,6 +305,40 @@ def get_data(config):
         len(dsets["train_set"]), len(dsets["test"]), len(dsets["database"])
 
 
+# add 1113 构建 caption 专用 DataLoader（使用 train_all.txt） ======
+def build_caption_loader(config):
+    """
+    功能：根据 train_all.txt 构建一个独立 DataLoader，用于 precompute_class_captions。
+    参数：
+        all_train_data : 训练全集的 txt（train_all.txt）
+    """
+    list_path = config["all_train_data"]
+    image_root = config.get("image_root")
+    resize_size = config["resize_size"]
+    crop_size = config["crop_size"]
+    batch_size = config["batch_size"]
+
+    # 读取 txt
+    with open(list_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    # 构造数据集
+    dataset = ImageList(
+        image_root,
+        lines,
+        transform=image_transform(resize_size, crop_size, "train_set")
+    )
+    print("load all train data for generating captions: len", len(dataset))
+    # 构造 loader
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=16
+    )
+    return loader
+
+
 def load_class_captions(jsonl_path: str) -> Dict[int, List[str]]:
     """
     从 JSONL 缓存文件中加载每个类别的 captions。
@@ -372,16 +406,19 @@ def append_class_captions(
     }
     with open(jsonl_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    print(f"[caption-cache] wrote class {cls_id} → {len(cap_texts)} captions to: {jsonl_path}")
+    print(f"[caption-cache] wrote class {cls_id} : total {len(cap_texts)} captions to: {jsonl_path}")
 
 
 # 1028 add
-def labels_to_text(ids):
+def labels_to_text(ids, dataset: str):
     """
-    把类别索引转成文本，若输入list(1...n)则返回全部文本，否则返回指定id的文本
+    把类别索引转成文本，若输入 list 则返回全部文本，否则返回指定 id 文本。
     """
-    lines = open("data/coco/class_names.txt", "r", encoding="utf-8").read().strip().split("\n")
-    names = [line.split()[1] for line in lines]
+    fname = f"data/{dataset}/class_names.txt"
+    with open(fname, "r", encoding="utf-8") as f:
+        lines = f.read().strip().split("\n")
+    names = [" ".join(line.split()[1:]) for line in lines]  # 允许多单词的类名
+
     return [names[i] for i in ids]
 
 
@@ -393,7 +430,7 @@ def count_labels_nums():
 
 
 # 1028 add
-def get_class_bank(net, device, cache_path):
+def get_class_bank(net, device, config, cache_path):
     # 如果缓存目录有文件直接载入并返回
     if os.path.isfile(cache_path):
         class_bank = torch.load(cache_path, map_location=device)
@@ -402,7 +439,8 @@ def get_class_bank(net, device, cache_path):
 
     # 否则用text_encoder重新生成并保存为class_bank.pt
     num_classes = count_labels_nums()  # 类别数
-    class_texts = labels_to_text(list(range(num_classes)))  # 获取class names ['person', 'bicycle', ...]
+    class_texts = labels_to_text(list(range(num_classes)),
+                                 dataset=config["dataset"])  # 获取class names ['person', 'bicycle', ...]
     print(f"[class_bank] classes number: {num_classes}  (first 5: {class_texts[:5]})")
     t0 = time.time()
     with torch.no_grad():
@@ -465,6 +503,7 @@ def make_prompt_for_captions(prompt: str, texts):
             return list(texts)
     else:
         p = prompt.strip()
+
         if all(isinstance(x, list) for x in texts):
             # 嵌套关键词列表：内部用 and 连接
             return [f"{p} {' and '.join(inner)}".strip() for inner in texts]
@@ -566,9 +605,7 @@ def load_filtered_captions_jsonl(jsonl_path: str):
 
 # 1105 add
 def get_filtered_captions(
-        caption_cache_path: str,
-        filtered_jsonl_path: str,
-        model_dir: str,
+        config,
         top_n: int = 4,
         min_ngram: int = 1,
         max_ngram: int = 2,
@@ -589,6 +626,11 @@ def get_filtered_captions(
     返回：
         {class_name: List[List[str]]}，与“每类 captions 的长度”一一对应
     """
+    filtered_jsonl_path = config.get("filtered_caps_path")
+    caption_cache_path = config.get("caption_save_path")
+    dataset = config.get("dataset")
+    kb_dir = config.get("keybert_model_dir")
+
     # A) 先尝试直接复用已存在的过滤结果
     if os.path.isfile(filtered_jsonl_path):
         cached = load_filtered_captions_jsonl(filtered_jsonl_path)
@@ -603,7 +645,7 @@ def get_filtered_captions(
         print(f"[filtered-captions] WARN: no source captions found at: {caption_cache_path}")
 
     # C) 模型就绪
-    kw_model = KeyBERT(model=model_dir)
+    kw_model = KeyBERT(model=kb_dir)
     nlp = spacy.load("en_core_web_sm")  # spacy英文语言模型，不支持中文处理，中文请移步：spacy-zh-core-web-sm等
 
     # D) 逐类处理并一次性写入
@@ -617,7 +659,7 @@ def get_filtered_captions(
                 caps = [f"class {c}"]
 
             per_caption_terms: List[List[str]] = []
-            cls_name = labels_to_text([int(c)])[0].strip().lower()
+            cls_name = labels_to_text([int(c)], dataset=dataset)[0].strip().lower()
             for cap in caps:
                 # 1 KeyBERT 抽取候选 (term, score)
                 pairs = extract_keywords(
@@ -774,19 +816,23 @@ def CalcTopMap(rB, qB, retrievalL, queryL, topk):
 # =========================
 @torch.no_grad()
 def precompute_class_captions(
-        train_loader,
         captioner,
-        caps_cache_path: str,
-        captions_num: int,
+        config,
         device: torch.device = torch.device("cuda")
 ):
     """
     功能：
-        - 每类生成若干 captions，并存入 jsonl。
-        - 若缓存文件已存在且非空，则直接读取并返回。
-    为每个类别最多采样 K 张图，按类批量 caption；写入 JSONL（{"class", "image_ids", "captions":[{"text":...}, ...]}）。
-    返回：class2caps: Dict[int, List[str]]，每类保留 K 条 captions 文本 (每个类随机挑 K个各生成 1条caption)。
+        - 每类采样 captions_num 张图片（K）
+        - 每张图生成 1 条 caption（top-1）
+        - 以 JSONL 写入：{"class", "image_ids", "captions":[{"text":...}, ...]}
+        - 若缓存已存在且非空，则直接读取
+    返回：
+        class2caps: {class_id: [caption1, caption2, ..., captionK]}
     """
+    captions_num = int(config.get("captions_num", 3))
+    caps_cache_path = config.get("caption_save_path")
+    dataset = config.get("dataset")
+
     # 如果文件存在且非空，跳过生成并直接读
     if os.path.isfile(caps_cache_path) and os.path.getsize(caps_cache_path) > 0:
         print(f"[caption-cache] found existing captions → skip generation")
@@ -794,7 +840,11 @@ def precompute_class_captions(
     else:
         print(f"[caption-cache] not found or empty → generating new captions...")
 
+        # 构建 caption 专用 DataLoader（使用 train_all.txt）
+        caption_loader = build_caption_loader(config)
+
         num_classes = count_labels_nums()  # 类别数
+        K = captions_num  # 每类采样 K 张图
         class2caps: Dict[int, List[str]] = {}
 
         # 每类采样容器
@@ -803,82 +853,59 @@ def precompute_class_captions(
         0: [img_tensor0_1, img_tensor0_2, img_tensor0_3],   # airplane 类的3张图
         1: [img_tensor1_1, img_tensor1_2, img_tensor1_3],   # automobile 类的3张图
         ...}
-
         picked_abs = {
         0: [".../airplane/001.png", ".../airplane/002.png", ".../airplane/003.png"],
         1: [".../automobile/101.png", "..."],
         ...}
-
         先遍历整个 train_loader；
         把属于每个类的图像（张量 + 路径）放进各自的 list；    
         当数量达到 captions_num（比如 3）就停止往该类里放；    
         所有类都达到 captions_num 后跳出循环；    
         最后再对每个类的 list 统一送入 captioner.generate()。
         """
-        picked_imgs = {c: [] for c in range(num_classes)}  # list[Tensor[C,H,W]] up to K 存放每个类别采样到的图像张量
-        picked_abs = {c: [] for c in range(num_classes)}  # 对应磁盘路径（用于写入 image_ids） 存放每个类别采样到的图像路径
+        picked_imgs = {c: [] for c in range(num_classes)}  # list[Tensor[C,H,W]] up to K 存放每个类别采样到的图像 tensor
+        picked_paths = {c: [] for c in range(num_classes)}  # 对应磁盘路径（用于写入 image_ids） 存放每个类别采样到的 图像路径
+        class_texts = labels_to_text(list(range(num_classes)), dataset=dataset)  # ["person","bicycle",...]
 
-        # 仅为“缓存缺失”的类采样
-        need_classes = {c for c in range(num_classes) if c not in class2caps}
-        if not need_classes:
-            print(f"[caption-precompute] all {num_classes} classes already cached -> skip")
-            return class2caps
-        print(f"[caption-precompute] missing classes: {sorted(list(need_classes))} (captions_num={captions_num})")
-
-        # 遍历一次数据加载器，收集每类至多 K 张（用已带 transform 的张量，避免重复读盘/增广不一致）
-        for images, labels, ind, paths in train_loader:
-            images = images.to(device)
+        # 遍历 train_loader，为每类收集 K 张图
+        for images, labels, ind, paths in caption_loader:
+            # labels: [B, C] → 逐行找到所有 >0 的 index（适用于 one-hot/multi-hot）
             if isinstance(labels, np.ndarray):
                 labels = torch.from_numpy(labels)
-            # 单列标签 → 直接取值；one-hot/多标签 → argmax
-            if labels.ndim == 2 and labels.size(1) == 1:
-                y_idx = labels.view(-1).long().detach().cpu().tolist()
-            else:
-                y_idx = torch.argmax(labels, dim=1).long().detach().cpu().tolist()
+            labels = labels.long()
 
-            for i, c in enumerate(y_idx):
-                if c not in need_classes:
-                    continue
-                if len(picked_imgs[c]) >= captions_num:
-                    continue
-                picked_imgs[c].append(images[i].detach().cpu())  # 暂存图像
-                picked_abs[c].append(str(paths[i]))  # 直接用 paths，避免索引错位
+            for b in range(labels.size(0)):
+                cls_list = torch.nonzero(labels[b] > 0).view(-1).tolist()
 
-            # 提前退出：都采满了就不再扫
-            if all((len(picked_imgs[c]) >= captions_num) or (c not in need_classes) for c in range(num_classes)):
+                for c in cls_list:
+                    if len(picked_imgs[c]) < K:
+                        picked_imgs[c].append(images[b].cpu())
+                        picked_paths[c].append(paths[b])
+            # 若全部类都收齐 K 张图 → 提前退出
+            if all(len(picked_imgs[c]) >= K for c in range(num_classes)):
                 break
 
-        # 对每个缺失类执行一次“按批 caption”
-        for c in sorted(list(need_classes)):
-            if len(picked_imgs[c]) == 0:
-                # 没采到图：回退——至少占位一个类名
-                class2caps.setdefault(c, [f"class {c}"])
-                continue
-
-            batch = torch.stack(picked_imgs[c], dim=0).to(device)  # [k,3,H,W]
-            t0 = time.time()
-            texts, _ = captioner.generate(batch, return_scores=False)
-            cost = time.time() - t0
-            cap_texts = [str(t).strip() for t in (texts or [])]
-
-            class_texts = labels_to_text(list(range(num_classes)))  # 获取class names ['person', 'bicycle', ...]
-
+        t0 = time.time()
+        # 为每类批量生成 captions（无 prompt）
+        for c in range(num_classes):
+            imgs = torch.stack(picked_imgs[c]).to(device)  # [k,3,H,W]
+            texts, scores = captioner.generate(imgs, return_scores=True)
+            cap_texts = [t.strip() for t in texts]
             # 落盘：image_ids 使用原始路径（已是绝对路径），统一为正斜杠
-            image_ids = [p.replace("\\", "/") for p in picked_abs[c]]
+            image_ids = [p.replace("\\", "/") for p in picked_paths[c]]
             append_class_captions(
-                caps_cache_path,
+                jsonl_path=caps_cache_path,
                 cls_id=int(c),
                 image_ids=image_ids,
                 captions_texts=cap_texts,  # 接口改名后的参数
                 class_name=class_texts[c],
             )
 
-            pick_text = cap_texts[0] if cap_texts else f"class {c}"
             class2caps[c] = cap_texts if cap_texts else [f"class {c}"]
+        cost = time.time() - t0
+        print(f"[caption-precompute] class {c}: k={len(cap_texts)}, time={cost:.2f}s")
 
-            print(f"[caption-precompute] class {c}: k={len(cap_texts)}, time={cost:.2f}s, text='{pick_text[:80]}'")
-
-        return class2caps
+    return class2caps
 
 
 # ====== t-SNE ===================================================

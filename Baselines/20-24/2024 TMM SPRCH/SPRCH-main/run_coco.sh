@@ -8,4 +8,6 @@ python main.py \
   --epochs 100 \
   --batchSize 64 \
   --binary_bits 64 \
+  --checkpoint 10 \
+  --k 5000 \
   --lr 1e-5

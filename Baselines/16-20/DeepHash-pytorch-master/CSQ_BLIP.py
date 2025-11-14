@@ -39,11 +39,13 @@ def get_config():
         "net": build_blip_net,
         "dataset": "coco",
         "epoch": 120,
-        "test_map": 30,
+        "eval_switch_epoch": 60,  # 前60轮 → test_map_1；后60轮 → test_map_2
+        "test_map_1": 30,  # 前半段评估间隔
+        "test_map_2": 10,  # 后半段评估间隔
         "device": torch.device("cuda:0"),
         "bit_list": [64],  # 哈希码位数
         "save_path": "save/CSQ_BLIP",
-        # "cifar10_dir": r"D:\Datasets\cifar10",
+        # "cifar10_dir": r"D:\Datasets\cifar10-image",  # 后续将实际数据路径设置在 image_root 中 方便统一修改
         "image_root": r"D:\Datasets\coco2017",
 
     }
@@ -98,12 +100,16 @@ class CSQLoss(torch.nn.Module):
         self.hash_targets = self.get_hash_targets(config["n_class"], bit).to(config["device"])
         self.multi_label_random_center = torch.randint(2, (bit,)).float().to(config["device"])
         self.criterion = torch.nn.BCELoss().to(config["device"])
+        self.last_center_loss = 0.0
+        self.last_q_loss = 0.0
 
     def forward(self, u, y, ind, config):
         u = u.tanh()
         hash_center = self.label2center(y)
         center_loss = self.criterion(0.5 * (u + 1), 0.5 * (hash_center + 1))
         Q_loss = (u.abs() - 1).pow(2).mean()
+        self.last_center_loss = center_loss.item()
+        self.last_q_loss = Q_loss.item()
         return center_loss + config["lambda"] * Q_loss
 
     def label2center(self, y):
@@ -145,30 +151,52 @@ def train_val(config, bit):
     optimizer = config["optimizer"]["type"](net.parameters(), **(config["optimizer"]["optim_params"]))
     criterion = CSQLoss(config, bit)
     # 扫描当前 save/算法名/ 文件夹，找到得分最高（mAP 最大）的一组前缀，然后删除其余所有 .pt 和 .npy 文件，只保留那一组
-    if "save_path" in config:
-        clean_save_dir_keep_best(config["save_path"], config["dataset"])
+    # if "save_path" in config:
+    #     clean_save_dir_keep_best(config["save_path"], config["dataset"])
     Best_mAP = 0
 
     for epoch in range(config["epoch"]):
         current_time = time.strftime('%H:%M:%S', time.localtime(time.time()))
+        # —— 动态评估间隔 —— #
+        if epoch < config["eval_switch_epoch"]:
+            eval_interval = config["test_map_1"]
+        else:
+            eval_interval = config["test_map_2"]
 
         net.train()
-        train_loss = 0
-        for image, labels, ind, path in train_loader:
-            image = image.to(device)
+        train_loss = 0.0
+        center_loss_meter = 0.0
+        q_loss_meter = 0.0
+        for images, labels, ind, paths in train_loader:
+            # ====== 进入一个 batch ======
+            # —— 搬到 GPU —— #
+            images = images.to(device)  # [B,3,H,W]
             labels = labels.to(device)
+            # —— 清梯度，防止梯度累计—— #
             optimizer.zero_grad()
-            u = net(image)
+            u = net(images)
             loss = criterion(u, labels.float(), ind, config)
             train_loss += loss.item()
+            center_loss_meter += criterion.last_center_loss
+            q_loss_meter += criterion.last_q_loss
             loss.backward()
             optimizer.step()
 
-        train_loss = train_loss / len(train_loader)
-        print(f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
-              f"total loss:{train_loss:.3f}")
+        # 统计并打印 每个 batch 的 loss 会抖动,把整轮（epoch）里所有 batch 的 loss 求平均
+        n_iter = len(train_loader)  # batch 数
+        train_loss_avg = train_loss / n_iter
+        csq_loss_avg = train_loss_avg  # CSQ loss 就是 total loss
+        center_loss_avg = center_loss_meter / n_iter
+        q_loss_avg = q_loss_meter / n_iter
+        print(
+            f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
+            f"bit:{bit}, dataset:{config['dataset']}, "
+            f"total loss:{train_loss_avg:.3f} = "
+            f"CSQ:{csq_loss_avg:.3f} (L_C:{center_loss_avg:.3f} + L_Q:{q_loss_avg:.3f}) "
+        )
 
-        if (epoch + 1) % config["test_map"] == 0:
+        # 评估与保存
+        if (epoch + 1) % eval_interval == 0:
             tst_binary, tst_label = compute_result(test_loader, net, device=device)
             trn_binary, trn_label = compute_result(dataset_loader, net, device=device)
             mAP = CalcTopMap(trn_binary.numpy(), tst_binary.numpy(), trn_label.numpy(), tst_label.numpy(),
