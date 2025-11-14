@@ -9,7 +9,7 @@ COCO,CSQ+,0.7936,,0.7911(car_ims  net:resnet)
 COCO,CSQ_BLIP,0.835,,blip net
 COCO,CSQ_BLIP_2,0.899,,align loss + label to text encoder
 COCO,CSQ_BLIP_3,0.902,,align loss + captions to text encoder   loss:0.406
-COCO,CSQ_BLIP_4,,,align loss + contrast loss + captions to text encoder
+COCO,CSQ_BLIP_4,0.835,,align loss + contrast loss + captions to text encoder  loss:2.802 (csq:0.490, align:0.000, id:0.008, contrast:2.311
 COCO,CSQ_BLIP_5,,,align loss + contrast loss + filtered captions to text encoder
 COCO,CSQ_BLIP_6,,,align loss + contrast loss + csq+ loss + filtered captions to text encoder(可能縮小了通用性)
 

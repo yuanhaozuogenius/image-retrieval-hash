@@ -271,10 +271,8 @@ def train_val(config, bit):
     class2caps_prompt = {}
     for c in range(n_class):
         captions = class2caps.get(c, None)  # 取该类原始 caption 列表（list[str]）
-        # if not captions: #
-        #     continue
-        prompted_caps = make_prompt_for_captions(prompt, captions)
-        class2caps_prompt[c] = prompted_caps
+        prompted_caps = make_prompt_for_captions(prompt, captions) # list[str]
+        class2caps_prompt[c] = prompted_caps  # dict
 
     # 释放 captioner 显存
     if torch.cuda.is_available():

@@ -270,10 +270,12 @@ def train_val(config, bit):
     neg_texts, neg_cls_ids = [], []
     # 将过滤后的captions用于生成负样本
     # 若 filtered_jsonl 存在则读取；否则基于 captions.jsonl 生成后再读取
-    filtered_captions = get_filtered_captions(config=config)
+    filtered_captions = get_filtered_captions(config=config)  # dict
 
     #  过率后的名词加提示词 a photo of ....
-    filtered_captions_prompt = make_prompt_for_captions(prompt, filtered_captions)
+    filtered_captions_prompt = {}
+    for c in range(n_class):
+        filtered_captions_prompt[c] = make_prompt_for_captions(prompt, filtered_captions.get(c, None))
 
     # 将“每条 caption 的关键词列表”拼成一句短语（"; " 连接），逐条写入负样本库
     for c in range(n_class):

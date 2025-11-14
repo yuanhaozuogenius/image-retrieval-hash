@@ -20,6 +20,7 @@ import matplotlib
 from sentence_transformers import SentenceTransformer
 from keybert import KeyBERT
 import spacy
+import gc
 
 """
 根据数据集名称设置分类数、topK 评价范围和数据路径等信息。
@@ -603,7 +604,7 @@ def load_filtered_captions_jsonl(jsonl_path: str):
     return out
 
 
-# 1105 add
+# 1114 add
 def get_filtered_captions(
         config,
         top_n: int = 4,
@@ -631,7 +632,7 @@ def get_filtered_captions(
     dataset = config.get("dataset")
     kb_dir = config.get("keybert_model_dir")
 
-    # A) 先尝试直接复用已存在的过滤结果
+    # A) 若过滤结果已存在，则读取
     if os.path.isfile(filtered_jsonl_path):
         cached = load_filtered_captions_jsonl(filtered_jsonl_path)
         if cached:
@@ -641,54 +642,59 @@ def get_filtered_captions(
     # B) 无缓存则生成：读取“每类多条 caption”
     class2caps = load_class_captions(caption_cache_path)  # 外部已实现
     class_ids = class2caps.keys()
+
     if not class_ids:
         print(f"[filtered-captions] WARN: no source captions found at: {caption_cache_path}")
 
-    # C) 模型就绪
+    # C) 模型：KeyBERT + spaCy
     kw_model = KeyBERT(model=kb_dir)
     nlp = spacy.load("en_core_web_sm")  # spacy英文语言模型，不支持中文处理，中文请移步：spacy-zh-core-web-sm等
 
-    # D) 逐类处理并一次性写入
-    os.makedirs(os.path.dirname(filtered_jsonl_path) or ".", exist_ok=True)
+    # D) 处理逻辑
     results = {}
+    os.makedirs(os.path.dirname(filtered_jsonl_path) or ".", exist_ok=True)
 
     with open(filtered_jsonl_path, "w", encoding="utf-8") as wf:
+
         for c in class_ids:
-            caps: List[str] = [str(t).strip() for t in (class2caps.get(c) or []) if str(t).strip()]
+            caps = [str(t).strip() for t in (class2caps.get(c) or []) if str(t).strip()]
             if not caps:
                 caps = [f"class {c}"]
 
-            per_caption_terms: List[List[str]] = []
             cls_name = labels_to_text([int(c)], dataset=dataset)[0].strip().lower()
+            per_caption_terms: List[List[str]] = []
+
             for cap in caps:
-                # 1 KeyBERT 抽取候选 (term, score)
+                # 1) KeyBERT 抽取候选 phrases
                 pairs = extract_keywords(
                     cap, kw_model,
                     top_n=top_n, min_ngram=min_ngram, max_ngram=max_ngram
                 )
-                # 2 按分数阈值过滤
-                terms = [w.strip().lower() for (w, s) in pairs if
-                         (score_threshold is None or float(s) >= float(score_threshold))]
-
+                # 2) 分数过滤
+                terms = [
+                    w.strip().lower()
+                    for (w, s) in pairs
+                    if (score_threshold is None or float(s) >= float(score_threshold))
+                ]
                 # 3 POS 过滤，仅保留名词/专有名词, 这一步摒弃了之前的 pos_filter_terms()
                 kept = []
                 for t in terms:
                     doc = nlp(t)
                     if any(tok.pos_ in {"NOUN", "PROPN"} for tok in doc):
                         kept.append(t)
-
-                # 4 加上该类的类名，去重保持顺序
-                kept.append(cls_name)
+                # 4) class_name 放在第一位 + 去重
                 seen = set()
                 uniq_terms = []
-                for x in kept:
-                    if x not in seen and x:
-                        uniq_terms.append(x)
-                        seen.add(x)
-
+                # (a) 先放 class_name
+                uniq_terms.append(cls_name)
+                seen.add(cls_name)
+                # (b) 再放 kept 里的 terms（原顺序 + 去重）
+                for t in kept:
+                    if t and t not in seen:
+                        uniq_terms.append(t)
+                        seen.add(t)
                 per_caption_terms.append(uniq_terms)
-
-                # 写入 JSONL，一类一行
+            # 写入 JSONL（一类一行）
             rec = {
                 "class_id": c,
                 "class_name": cls_name,
@@ -699,6 +705,15 @@ def get_filtered_captions(
             results[c] = per_caption_terms
 
         print(f"[filtered-captions] wrote {len(results)} classes to: {filtered_jsonl_path}")
+        # 清理 KeyBERT / spaCy 内存
+        try:
+            del kw_model
+            del nlp
+        except:
+            pass
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
     return results
 
 
