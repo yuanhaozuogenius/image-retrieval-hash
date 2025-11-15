@@ -307,6 +307,12 @@ def train_val(config, bit):
         caption_bank = net.text_encoder.encode(texts).to(device)  # [Nneg, D]
         caption_bank = F.normalize(caption_bank, dim=-1)
 
+    # TextEncoder用完后, 清理模型显存
+    # print("Before del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
+    del net.text_encoder
+    torch.cuda.empty_cache()
+    # print("After  del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
+
     # 优化器（分组：fc1 / hash head / fc2）
     base_optim = config["optimizer"]
     base_lr = base_optim["optim_params"].get("lr", 1e-5)

@@ -254,17 +254,17 @@ def cifar_dataset(config):
                                                batch_size=batch_size,
                                                # shuffle=True, 在txt文本中已经做了shuffle
                                                shuffle=False,
-                                               num_workers=16)
+                                               num_workers=4)
 
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset,
                                               batch_size=batch_size,
                                               shuffle=False,
-                                              num_workers=16)
+                                              num_workers=4)
 
     database_loader = torch.utils.data.DataLoader(dataset=database_dataset,
                                                   batch_size=batch_size,
                                                   shuffle=False,
-                                                  num_workers=16)
+                                                  num_workers=4)
 
     return train_loader, test_loader, database_loader, \
         train_index.shape[0], test_index.shape[0], database_index.shape[0]
@@ -299,7 +299,7 @@ def get_data(config):
         dset_loaders[data_set] = util_data.DataLoader(
             dsets[data_set],
             batch_size=data_config[data_set]["batch_size"],
-            shuffle=False, num_workers=16  # 改为False，在txt文本中已经做了shuffle
+            shuffle=False, num_workers=4  # 改为False，在txt文本中已经做了shuffle
         )
 
     return dset_loaders["train_set"], dset_loaders["test"], dset_loaders["database"], \
@@ -447,6 +447,13 @@ def get_class_bank(net, device, config, cache_path):
     with torch.no_grad():
         class_bank = net.text_encoder.encode(class_texts).to(device)  # [C,256]
         print(f"[class_bank] encode time: {time.time() - t0:.3f}s, shape={tuple(class_bank.shape)}")
+
+    # TextEncoder用完后, 清理模型显存
+    # print("Before del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
+    del net.text_encoder
+    torch.cuda.empty_cache()
+    # print("After  del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
+
     # 缓存到 CPU 文件，训练时再 to(device)
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
     torch.save(class_bank.detach().cpu(), cache_path)
@@ -630,7 +637,7 @@ def get_filtered_captions(
     filtered_jsonl_path = config.get("filtered_caps_path")
     caption_cache_path = config.get("caption_save_path")
     dataset = config.get("dataset")
-    kb_dir = config.get("keybert_model_dir")
+    kb_dir = config.get("")
 
     # A) 若过滤结果已存在，则读取
     if os.path.isfile(filtered_jsonl_path):
@@ -647,7 +654,7 @@ def get_filtered_captions(
         print(f"[filtered-captions] WARN: no source captions found at: {caption_cache_path}")
 
     # C) 模型：KeyBERT + spaCy
-    kw_model = KeyBERT(model=kb_dir)
+    kw_model = KeyBERT(model=SentenceTransformer(kb_dir, device="cpu"))
     nlp = spacy.load("en_core_web_sm")  # spacy英文语言模型，不支持中文处理，中文请移步：spacy-zh-core-web-sm等
 
     # D) 处理逻辑

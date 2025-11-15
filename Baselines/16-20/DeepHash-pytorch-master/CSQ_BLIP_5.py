@@ -344,6 +344,12 @@ def train_val(config, bit):
             # 如果相同，就要把这些 caption 当作“本类”并屏蔽掉（不作为负样本）
             neg_cls_ids = torch.tensor(neg_cls_ids, device=device, dtype=torch.long)  # [Nneg]
 
+    # TextEncoder用完后, 清理模型显存
+    # print("Before del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
+    del net.text_encoder
+    torch.cuda.empty_cache()
+    # print("After  del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
+
     tau = float(config.get("contrast_temp", 0.07))  # 可学习的温度参数，用于控制概率分布的尖锐程度
     contrast_weight = float(config.get("contrast_weight", 1.0))
 

@@ -5,84 +5,54 @@ import shutil
 import sys
 
 import torch
+import torch.nn as nn
+import numpy as np
+from tqdm import tqdm
 
 from Loss import Loss, HashCenterLoss
 from common import utils
-from common.plot import Draw
+from common.logger import Logger
 from dataloader.DataSet_loader import getDataLoader
 from evaluate.measure_utils import *
-from vit_modeling import VisionTransformer, VIT_CONFIGS
 from network import HashModel, CenterModel, AlexNetFc
-
-import torch.optim as optim
 from options import parser
 
+
 class Engine(object):
-    def __init__(self, option, state, config):
+    def __init__(self, option, state):
         self.option = option
         self.state = state
         self.class_num_dict = {'voc2012': 20, 'coco': 80, 'nuswide': 21}
-        self.is_multi_label = True \
-            if option.data_name in ['voc2012','coco', 'nuswide'] else False
-        self.add_part_loss = False
-
-        self.device = torch.device(option.device)
-        self.running_use_gpu = False
+        self.is_multi_label = True if option.data_name == 'voc2012' or option.data_name == 'coco' or option.data_name == 'nuswide' else False
 
     def useGPU(self, x):
-        if self.option.use_gpu and self.option.device!='cpu' and torch.cuda.is_available():
+        if self.option.use_gpu and torch.cuda.is_available():
             return x.cuda()
         else:
             return x
 
     def main(self):
-        if torch.cuda.is_available() is False:
-            Logger.info('No GPU available in this machine...\n')
-            self.device = 'cpu'
-            self.running_use_gpu = False
-        else:
-            if self.state['use_gpu']==False or self.state['device']=='cpu':
-                self.device = 'cpu'
-                self.running_use_gpu = False
-                Logger.info('\tUse CPU for running...')
-            else:
-                self.running_use_gpu = True
-                Logger.info('\tUse GPU for running...')
-
-        Logger.info('self.device: {},  self.state["use_gpu"]: {}, self.running_use_gpu: {}'.\
-                    format(self.device, self.state['use_gpu'], self.running_use_gpu)  )
-
         train_loader, test_loader, database_loader = getDataLoader(self.option)
-        vit_config = VIT_CONFIGS["ViT-B_16"]
-        Logger.info('vit_config:\t{}'.format('ViT-B_16'))
-        hash_model = VisionTransformer(vit_config, img_size=option.image_size, zero_head=True,
-                                       num_classes=option.num_class, hash_bit=option.hash_bit, option=self.option)
-
-        hash_model.load_from(np.load(self.state["pretrained_dir"]))
-
-        if self.option.center_model=='center':
-            center_model = CenterModel(self.option)
-
-        else:
-            assert False, "No such a center model type\n"
-
+        if self.option.model_type == 'resnet50':
+            hash_model = HashModel(self.option)
+        elif self.option.model_type == 'alexnet':
+            hash_model = AlexNetFc(self.option)
+        center_model = CenterModel(self.option)
         criterion = Loss(self.option, self.state)
-
         if self.option.center_update:
             criterion_center = HashCenterLoss(self.option, self.state)
         else:
             criterion_center = None
-
         optimizer_hash = torch.optim.Adam(hash_model.getConfig_params(), lr=option.lr, weight_decay=10 ** -5)
         if self.option.center_update:
             optimizer_center = torch.optim.Adam(center_model.getConfig_params(), lr=option.lr_center)
         else:
             optimizer_center = None
-
-        if option.resume:
-            start_epoch = self.resume(hash_model, center_model, optimizer_hash, optimizer_center)
-        else:
-            start_epoch = -1
+        # if option.resume:
+        # 禁用断点恢复
+        # start_epoch = self.resume(hash_model, center_model, optimizer_hash, optimizer_center)
+        # else:
+        start_epoch = -1  # 永远从头开始，不读取checkpoint
 
         if self.option.use_gpu and torch.cuda.is_available():
             hash_model = torch.nn.DataParallel(hash_model,
@@ -92,16 +62,13 @@ class Engine(object):
             criterion = criterion.cuda()
             if self.option.center_update:
                 criterion_center = criterion_center.cuda()
-
         self.run_epoch(hash_model, center_model, criterion, criterion_center, optimizer_hash, optimizer_center,
                        train_loader, test_loader, database_loader, start_epoch)
 
     def run_epoch(self, hash_model, center_model, criterion, criterion_center, optimizer_hash, optimizer_center,
                   train_loader,
                   test_loader, database_loader, start_epoch):
-
         centerWeight_train = self.initCenterWeight(train_loader)
-
         self.state['best_MAP'] = 0.0
         self.state['best_epoch'] = 0
         self.state['Database_hashpool_path'] = None
@@ -109,63 +76,53 @@ class Engine(object):
         self.state['Trainbase_hashpool_path'] = None
         self.state['final_result'] = None
         self.state['filename_previous_best'] = None
-
         self.state['interClass_loss'] = []
-
         Logger.divider("start training..")
- 
-        for epoch in range(start_epoch + 1, self.option.epochs):
 
+        for epoch in range(start_epoch + 1, self.option.epochs):
             lr = self.adjust_learning_rate(optimizer_hash, epoch)
             lr_center = self.adjust_learning_rate(optimizer_center, epoch, 'centerNet')
             Logger.divider("epoch[{}] lr:{} lr_center:{}".format(epoch, lr, lr_center))
-
             if optimizer_center is not None:
                 optimizer_center.zero_grad()
             self.on_start_epoch(epoch)
             ''''
             obtain hash centers by center_model
             '''
-
             hashCenter_pre, word_embedding = self.forward_hashCenter(center_model, train_loader)
             self.state['hash_center_pre'] = hashCenter_pre
 
             loss_epoch = self.train(hash_model, train_loader, criterion, hashCenter_pre, optimizer_hash,
                                     centerWeight_train, epoch)
-
             Logger.info("\tEpoch : {}, Mean Loss {}\n".format(epoch, np.mean(loss_epoch)))
 
-
             is_best = False
-            if epoch >= self.option.start_test_epoch:
+            if epoch > 0 and epoch % self.option.start_test_epoch == 0:
                 (Precision, Recall1, MAP1), (MAP2, Recall2, Precision2) = self.test(hash_model, train_loader,
                                                                                     test_loader,
                                                                                     database_loader,
                                                                                     centerWeight_train, epoch)
                 Logger.info(
-                    "epoch {0} Result：{1}\n".format(epoch, ((Precision, Recall1, MAP1), (MAP2, Recall2, Precision2))))
- 
-                if self.option.center_update:
+                    "epoch {0} Result："
+                    "(Precision={1:.4f}, Recall1={2:.4f}, MAP1={3:.4f}) "
+                    "(MAP2={4:.4f}, Recall2={5:.4f}, Precision2={6:.4f})\n".format(
+                        epoch,
+                        float(Precision), float(Recall1), float(MAP1),
+                        float(MAP2), float(Recall2), float(Precision2)
+                    )
+                )
 
+                if self.option.center_update:
                     self.updateCenter(criterion_center, word_embedding, centerWeight_train, hashCenter_pre,
                                       optimizer_center)
-
                 self.saveStatus(epoch, centerWeight_train, hashCenter_pre, MAP2,
                                 ((Precision, Recall1, MAP1), (MAP2, Recall2, Precision2)))
-
-
-                time = Logger.getTimeStr(state['start_time'])
-                path = "../data/" + option.data_name + "/" + option.data_name + "_" + time + "_" + str(
-                    epoch) + "_weight.npy"
-                np.save(path, centerWeight_train)
-
                 is_best = MAP2 >= self.state['best_MAP']
                 Logger.info("MAP epoch {}\tMAP_best {}\tIs_best {}\tBest epoch {}".format(MAP2, self.state['best_MAP'],
                                                                                           MAP2 >= self.state[
                                                                                               'best_MAP'],
                                                                                           self.state['best_epoch']))
-
-            self.on_end_epoch(option, state, epoch, hash_model, center_model, is_best, optimizer_hash, optimizer_center)
+            # self.on_end_epoch(option, state, epoch, hash_model, center_model, is_best, optimizer_hash, optimizer_center)
 
         Logger.info("start drawing ...")
         Logger.info(
@@ -185,7 +142,6 @@ class Engine(object):
 
         loss = criterion_center(word_embedding, hashCenter_pre,
                                 weightCenter, utils.getTrainbaseHashPoolPath(self.option, self.state))
-        Logger.info("adapter loss {}".format(loss.item()))
         loss.backward()
         optimizer.step()
 
@@ -206,30 +162,26 @@ class Engine(object):
         }
         self.save_checkpoint(option, state, model_dict, is_best)
 
+    pass
 
     def train(self, model, train_loader, criterion, hash_center_pre, optimizer, centerWeight, epoch):
         model.train()
-
 
         loss_epoch = []
 
         train_loader = tqdm(train_loader, desc="Epoch [" + str(epoch) + "]==>Training:")
         for i, (input, target) in enumerate(train_loader):
             images = input[0]
-
             hash_code = model(images)
-
             centerWeight_batch = self.useGPU(
                 torch.tensor(centerWeight[i * self.option.batch_size:(i + 1) * self.option.batch_size],
                              requires_grad=True))
 
             hash_centroid = self.getHashCenters(target, hash_center_pre.detach(), centerWeight_batch)
 
-
             if not self.option.fixed_weight:
                 optimizer.zero_grad()
                 centerWeight_batch.retain_grad()
-
                 loss = criterion(hash_code.detach(), hash_centroid, hash_center_pre.detach(), centerWeight_batch,
                                  target)
                 loss.backward(retain_graph=True)
@@ -240,9 +192,7 @@ class Engine(object):
 
                 centerWeight[
                 i * self.option.batch_size:(i + 1) * self.option.batch_size] = centerWeight_batch.cpu().detach().numpy()
-
             optimizer.zero_grad()
-
             loss = criterion(hash_code, hash_centroid.detach(), hash_center_pre.detach(), centerWeight_batch.detach(),
                              target)
             loss.backward()
@@ -250,13 +200,12 @@ class Engine(object):
             loss_epoch.append(loss.data.cpu().numpy())
         return loss_epoch
 
-
     def test(self, model, train_loader, test_loader, database_loader, centerWeight, epoch):
         model.eval()
+
         self.predict_hash_code(model, database_loader, centerWeight, epoch, database_type="database")
         self.predict_hash_code(model, test_loader, centerWeight, epoch, database_type='testbase')
         self.predict_hash_code(model, train_loader, centerWeight, epoch, database_type='trainbase')
-
 
         database_hashcode, database_labels = utils.loadHashPool(self.option, self.state,
                                                                 utils.getDatabaseHashPoolPath(self.option,
@@ -278,7 +227,6 @@ class Engine(object):
 
         del testbase_labels
         Logger.info("===> start calculate MAP!\n")
-
 
         Precision, Recall1, MAP1 = get_precision_recall_by_Hamming_Radius_optimized(
             database_hashcode_numpy,
@@ -332,7 +280,6 @@ class Engine(object):
             optimizer.param_groups[0]['lr'] = option.multi_lr * lr
             optimizer.param_groups[1]['lr'] = lr
         elif type == 'centerNet' and self.option.center_update:
-
             lr = option.lr_center * (0.7 ** (epoch // 10))
             optimizer.param_groups[0]['lr'] = lr
         elif type == 'centerNet' and not self.option.center_update:
@@ -340,17 +287,10 @@ class Engine(object):
         return lr
 
     def getHashCenters(self, labels, hash_centers, center_weight):
-        '''
-        get hash center for every image
-        :param labels:
-        :param hash_centers:
-        :param center_weight:
-        :return:
-        '''
+
         if self.is_multi_label:
             hash_centers = self.Hash_center_multilables(labels, hash_centers, center_weight=center_weight)
         else:
-
             hash_label = (labels == 1).nonzero()[:, 1]
             hash_centers = hash_centers[hash_label]
         return hash_centers
@@ -358,10 +298,9 @@ class Engine(object):
     def Hash_center_multilables(self, labels,
                                 Hash_center_pre,
                                 center_weight):
-
         hash_centers = self.useGPU(torch.FloatTensor(torch.FloatStorage()))
         for (i, label) in enumerate(labels):
-            one_labels = (label == 1).nonzero()  
+            one_labels = (label == 1).nonzero()
             one_labels = one_labels.squeeze(1)
             Centers = Hash_center_pre[one_labels][:]
             center_weight_one = center_weight[i][one_labels]
@@ -372,9 +311,8 @@ class Engine(object):
     def forward_hashCenter(self, centerModel, loader):
 
         for i, (input, target) in enumerate(loader):
-
             word_embedding = self.useGPU(input[2][0])
-            hashCenter_pre = centerModel(word_embedding)        
+            hashCenter_pre = centerModel(word_embedding)
             return hashCenter_pre
 
     def initCenterWeight(self, data_loader):
@@ -391,7 +329,6 @@ class Engine(object):
         if os.path.exists(file_path):
             self.state['centerWeight_path'] = file_path
             return np.load(file_path)
-
 
         Logger.info("init center weight..")
         all_weight = None
@@ -434,25 +371,24 @@ class Engine(object):
             filename = os.path.join(save_model_path, filename_)
             if not os.path.exists(save_model_path):
                 os.makedirs(save_model_path)
-        Logger.info('save model {filename}\n'.format(filename=filename))
-        torch.save(model_dict, filename)  
+        # Logger.info('save model {filename}\n'.format(filename=filename))
+        # torch.save(model_dict, filename)
         if is_best:
-
+            filename_best = 'model_best.pth.tar'
             if save_model_path is not None:
-
+                filename_best = os.path.join(save_model_path, filename_best)
+            shutil.copyfile(filename, filename_best)
+            if save_model_path is not None:
                 if state['filename_previous_best'] is not None and os.path.exists(state['filename_previous_best']):
                     os.remove(state['filename_previous_best'])
-
                 filename_best = os.path.join(save_model_path,
                                              'model_best_{score:.4f}.pth.tar'.format(score=model_dict['best_MAP']))
                 shutil.copyfile(filename, filename_best)
-                Logger.info('Current model is correpsopnding to best performance, save model {filename}\n'. \
-                            format(filename=filename_best))
                 state['filename_previous_best'] = filename_best
 
     def saveStatus(self, epoch, centerWeight_train, hashCenter_pre, MAP, result_all=None):
 
-        np.save('../data/' + self.option.data_name + '/centers.npy', hashCenter_pre.detach().cpu().numpy())
+        # np.save('../data/' + self.option.data_name + '/centers.npy', hashCenter_pre.detach().cpu().numpy())
         if MAP >= self.state['best_MAP']:
             if self.state['Database_hashpool_path'] is not None and os.path.exists(
                     self.state['Database_hashpool_path']):
@@ -469,11 +405,10 @@ class Engine(object):
             self.state['best_MAP'] = MAP
             self.state['best_epoch'] = epoch
             self.state['final_result'] = result_all
-            np.save(utils.getWeightBestPath(self.option, self.state), centerWeight_train)
-
+            # np.save(utils.getWeightBestPath(self.option, self.state), centerWeight_train)
             pass
         elif epoch >= self.option.epochs - 1:
-            np.save('../data/' + self.option.data_name + '/finalweight.npy', centerWeight_train)
+            # np.save('../data/' + self.option.data_name + '/finalweight.npy', centerWeight_train)
             pass
         else:
             if os.path.exists(utils.getDatabaseHashPoolPath(self.option, self.state)):
@@ -484,6 +419,7 @@ class Engine(object):
                 os.remove(utils.getTrainbaseHashPoolPath(self.option, self.state))
         pass
 
+    # 中断后继续
     def resume(self, model_hash, model_center, optimizer_hash, optimizer_center):
         path_checkpoint = option.resume_path
         if option.resume and os.path.exists(path_checkpoint):
@@ -512,15 +448,12 @@ class Engine(object):
 if __name__ == '__main__':
     start_time = datetime.datetime.now()
     Logger.info("\t\tstart program\t\t")
-    option= parser.parse_args()
+    option = parser.parse_args()
     Logger.divider("print option")
     for k, v in vars(option).items():
         Logger.info('\t{}: {}'.format(k, v))
     state = {'start_time': start_time}
-    state['use_gpu'] = option.use_gpu
-    state['device'] = option.device
-    state['pretrained_dir'] = "./vit_pretrain_models/ViT-B_16.npz"
-    engine = Engine(option=option, state=state, config=None)
+    engine = Engine(option=option, state=state)
     engine.main()
     end_time = datetime.datetime.now()
     Logger.divider("END {}".format(Logger.getTimeStr(end_time)))
