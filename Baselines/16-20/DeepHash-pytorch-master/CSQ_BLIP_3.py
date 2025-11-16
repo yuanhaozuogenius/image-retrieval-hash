@@ -47,7 +47,7 @@ def get_config():
         "net": build_blip_net,
         "dataset": "coco",
         "epoch": 120,
-        "eval_switch_epoch": 60,  # 前60轮 → test_map_1；后60轮 → test_map_2
+        "eval_switch_epoch": 90,  # 前60轮 → test_map_1；后60轮 → test_map_2
         "test_map_1": 30,  # 前半段评估间隔
         "test_map_2": 10,  # 后半段评估间隔
         "device": torch.device("cuda:0"),
