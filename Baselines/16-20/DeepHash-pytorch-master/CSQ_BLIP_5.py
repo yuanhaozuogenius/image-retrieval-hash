@@ -69,7 +69,7 @@ def get_config():
         "caption_num_beams": 1,  # 建议 ≥2 以保证 sequences_scores 可用
         "caption_max_new_tokens": 32,  # 句长上限（越大越慢）
         "captions_num": 10,  # 固定采样数 K
-        "caption_prompt": "a photo of a",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
+        "caption_prompt": "a photo of",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
 
         # 同近异远
         "contrast_temp": 0.07,  # InfoNCE 温度
@@ -80,7 +80,10 @@ def get_config():
         "all_train_data": r"./data/{dataset}/train_all.txt",
         "keybert_model_dir": r"D:\Models\all-MiniLM-L6-v2",  # Sentence-Transformers 本地目录
 
-        "caption_save_path": "./data/{dataset}/captions.jsonl",  # 保存图像生成的caption文本，
+        "filtered_captions_prompt_path": r"./tmp_data/filtered_captions_prompt.jsonl",
+
+
+                    "caption_save_path": "./data/{dataset}/captions.jsonl",  # 保存图像生成的caption文本，
         "filtered_caps_path": "./data/{dataset}/filtered_captions.jsonl",  # 保存过滤后的caption文本，
         "fc_path": "./trained_mappers/image_mapper.pth",  # 若没有可注释掉加载
         "med_config": "BLIP/configs/med_config.json",
@@ -319,20 +322,20 @@ def train_val(config, bit):
     # 若 filtered_jsonl 存在则读取；否则基于 captions.jsonl 生成后再读取
     filtered_captions = get_filtered_captions(config=config)  # dict
 
-    #  过率后的名词加提示词 a photo of ....
+    #  过率后的名词加提示词 a photo of 并拼接为一句final sentence
     filtered_captions_prompt = {}
     for c in range(n_class):
         filtered_captions_prompt[c] = make_prompt_for_captions(prompt, filtered_captions.get(c, None))
+    # 打印filtered_captions_prompt
+    with open(config.get("filtered_captions_prompt_path"), "w", encoding="utf-8") as f:
+        f.write(json.dumps(filtered_captions_prompt, ensure_ascii=False))
 
-    # 将“每条 caption 的关键词列表”拼成一句短语（"; " 连接），逐条写入负样本库
+    # 将“每类 caption 的关键句写入负样本库
     for c in range(n_class):
-        term_lists = filtered_captions_prompt.get(c, None)
-        if term_lists and len(term_lists) > 0:
-            for terms in term_lists:
-                text = "; ".join([t.strip() for t in terms if isinstance(t, str) and t.strip()])
-                if text:
-                    neg_texts.append(text)
-                    neg_cls_ids.append(c)
+        sentence = filtered_captions_prompt.get(c, None)
+        if sentence and len(sentence) > 0:
+            neg_texts.append(sentence)
+            neg_cls_ids.append(c)
 
     with torch.no_grad():
         if len(neg_texts) > 0:
@@ -405,10 +408,12 @@ def train_val(config, bit):
 
             # —— 文本侧：从 prompt_bank 取正样本锚 —— #
             with torch.no_grad():
-                if labels.ndim == 2 and labels.size(1) == 1:  # 多标签
-                    y_idx = labels.view(-1).long()
+                if (labels.sum(dim=1) > 1).any():  # 多标签  若labels第二维度的和>1的情况在当前batch中至少发生一次 → 至少存在一个多标签样本 → 返回True
+                    # 多标签下每轮batch随机选一个正类，比固定只选第一个热标签好
+                    # multinomial对 labels 的 每一行，按该行的数值作为“权重”，随机采样 1 个索引。
+                    y_idx = torch.multinomial(labels, 1).squeeze(1).long()
                 else:  # 非多标签（单标签）
-                    y_idx = labels.argmax(dim=1).long()
+                    y_idx = labels.argmax(dim=1).long()  # 把 one-hot恢复为class id(返回1对应的索引即为所代表的类别id)
 
                 # 调试更稳：用 CPU 做索引再搬回 GPU，避免 GPU 高级索引隐式同步
                 y_idx_cpu = y_idx.detach().cpu()
@@ -442,33 +447,37 @@ def train_val(config, bit):
 
             img_feats = F.normalize(v_adapt, dim=-1)  # [B,256] 表示当前要查询的目标图像特征
 
-            #   正样本对及正样本对的对比logits
-            pos_vecs = prompt_bank[y_idx]
-            pos_logits = (img_feats * pos_vecs).sum(dim=1, keepdim=True) / tau  # [B,1] 图像与正样本相似度
+            # —— 多正样本 InfoNCE（图像→文本，正类=labels中的所有1） —— #
+            pos_mask = (labels > 0)  # [B, C] 将onehot label转换为bool值
 
+            # 1) prompt 侧：所有类的 logits（作为“候选文本集合”的一部分）
+            pos_logits_all = (img_feats @ prompt_bank.t()) / tau  # [B, C]
+
+            # 2) caption 侧：负样本库 logits（并屏蔽：属于该图任一正类的 caption）
             if caption_bank.size(0) > 0:
-                # caption_bank数据集所有类的编码结果  neg_cls_ids 与caption_bank对应的类别 ID 向量
-                bank, neg_ids = caption_bank, neg_cls_ids
+                bank, neg_ids = caption_bank, neg_cls_ids  # bank:[Nneg,D], neg_ids:[Nneg]
+                neg_logits = (img_feats @ bank.t()) / tau  # [B, Nneg]
 
-                # 计算图像-负样本对文本的 相似度矩阵 S = v @ t^T / τ
-                neg_logits = (img_feats @ bank.t()) / tau
-                # 屏蔽正样本（即同类 caption）防止其被当作负样本
-                # mask[b, j] = True 表示: 若某条 caption 属于当前图像的同类（neg_ids == y_idx），
-                # 则将其相似度置为极小值-1e4，相当于排除本类 caption，防止“伪负样本”干扰。
-                mask = (neg_ids.unsqueeze(0) == y_idx.unsqueeze(1))  # [B, Nneg]
+                # mask[b, j] = True 表示第j条caption属于该样本的某个正类 → 伪负样本，需屏蔽
+                # pos_mask[:, neg_ids] => [B, Nneg]
+                mask = pos_mask[:, neg_ids]
                 neg_logits = neg_logits.masked_fill(mask, -1e4)
-
-                # 拼接出最终对比logits
-                logits = torch.cat([pos_logits, neg_logits], dim=1)
-
-                # 每个样本的正确类别在 logits 第 0 列
-                targets = torch.zeros(logits.size(0), dtype=torch.long, device=device)
-
-                # 图像→文本 对比损失 (单向 InfoNCE)
-                contrast_loss = F.cross_entropy(logits, targets)
+                # all_logits[b, :]：第 b 张图像对所有候选文本的相似度（prompt + caption 负样本）
+                all_logits = torch.cat([pos_logits_all, neg_logits], dim=1)  # [B, C+Nneg]
             else:
-                # 若 caption_bank<=0 为空（例如首次运行或无 caption）, 不计算对比损失
-                contrast_loss = torch.tensor(0.0, device=device)
+                all_logits = pos_logits_all  # [B, C]
+
+            # 3) multi-positive 分子/分母：logsumexp
+            # 分母：对所有候选文本求 logsumexp
+            log_den = torch.logsumexp(all_logits, dim=1)  # [B]
+
+            # 分子：仅对正类 prompt 求 logsumexp（把非正类置为极小值）
+            # pos_logits_all[b, c]：第 b 张图像与第 c 个 prompt（类） 的相似度
+            pos_only = pos_logits_all.masked_fill(~pos_mask, -1e4)  # [B, C]
+            log_num = torch.logsumexp(pos_only, dim=1)  # [B]
+
+            contrast_loss = (-(log_num - log_den)).mean()
+
 
             if torch.cuda.is_available(): torch.cuda.synchronize()
 

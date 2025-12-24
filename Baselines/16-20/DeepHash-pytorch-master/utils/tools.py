@@ -486,38 +486,72 @@ def make_prompt_texts(prompt: str, class_names: List[str]) -> List[str]:
 
 
 # add 1112
+# modify 1210
 def make_prompt_for_captions(prompt: str, texts):
     """
-    对句子列表或嵌套的词列表加 prompt，如果没有直接返回（and拼接后返回），有则将prompt作为profix返回
-        ① List[str]      → ["a photo of cat", "a photo of dog"]
-        ② List[List[str]]→ ["a photo of cat and dog", "a photo of car and road"]
-        1. 输入为嵌套关键词列表：
-            prompt = "a photo of"
-            texts = [["cat", "dog"], ["car", "road"]]
-            输出：
-                ["a photo of cat and dog", "a photo of car and road"]
-        2. 输入为句子列表：
-            prompt = "a photo of"
-            texts = ["a small cat", "a running dog"]
-            输出：
-                ["a photo of a small cat", "a photo of a running dog"]
+    对一类的多条文本 / 多组关键词进行合并：
+        - 输入可以是：
+            ① List[List[str]]：K 组关键词
+            ② List[str]      ：K 条 caption 句子
+        - 统一行为：
+            把 K 条内容合并 → 去重 → 用 " and " 连接 → 加 prompt 前缀
+            最终返回仅包含 1 个句子的列表 [final_sentence]
     """
-    if not prompt or not prompt.strip():
-        if all(isinstance(x, list) for x in texts):
-            # 嵌套关键词列表
-            return [" and ".join(inner) for inner in texts]
-        else:
-            # 普通句子列表，直接返回
-            return list(texts)
-    else:
-        p = prompt.strip()
+    # 空输入兜底
+    if not texts:
+        return []
 
-        if all(isinstance(x, list) for x in texts):
-            # 嵌套关键词列表：内部用 and 连接
-            return [f"{p} {' and '.join(inner)}".strip() for inner in texts]
-        else:
-            # 普通句子列表：直接加前缀
-            return [f"{p} {str(t).strip()}".strip() for t in texts]
+    # 1) 情况一：texts 是 K 组关键词（List[List[str]]）
+    if all(isinstance(x, list) for x in texts):
+        merged = []
+        for group in texts:
+            for w in group:
+                w = str(w).strip()
+                if w:
+                    merged.append(w)
+
+        # 去重保序
+        seen = set()
+        uniq_terms = []
+        for w in merged:
+            if w not in seen:
+                uniq_terms.append(w)
+                seen.add(w)
+
+        if not uniq_terms:
+            return []
+
+        core = " and ".join(uniq_terms)
+
+    # 2) 情况二：texts 是 K 条 caption 句子（List[str]）
+    else:
+        cleaned = []
+        for t in texts:
+            s = str(t).strip()
+            if s:
+                cleaned.append(s)
+
+        # 去重保序
+        seen = set()
+        uniq_sents = []
+        for s in cleaned:
+            if s not in seen:
+                uniq_sents.append(s)
+                seen.add(s)
+
+        if not uniq_sents:
+            return []
+
+        core = " and ".join(uniq_sents)
+
+    # 3) 加 prompt 前缀（若有）
+    if prompt and prompt.strip():
+        final_sentence = f"{prompt.strip()} {core}".strip()
+    else:
+        final_sentence = core
+
+    return final_sentence
+
 
 
 # add 1105

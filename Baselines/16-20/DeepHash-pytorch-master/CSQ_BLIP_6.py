@@ -71,7 +71,7 @@ def get_config():
         "caption_num_beams": 1,  # 建议 ≥2 以保证 sequences_scores 可用
         "caption_max_new_tokens": 32,  # 句长上限（越大越慢）
         "captions_num": 10,  # 固定采样数 K
-        "caption_prompt": "a photo of a",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
+        "caption_prompt": "a photo of",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
 
         # 同近异远
         "contrast_temp": 0.07,  # InfoNCE 温度

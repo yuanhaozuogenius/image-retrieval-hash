@@ -8,10 +8,10 @@ import os
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 scripts = [
-    # os.path.join(BASE, "2016_AAAI_DHN.py"),
+    os.path.join(BASE, "2016_AAAI_DHN.py"),
     os.path.join(BASE, "2016_CVPR_DSH.py"),
-    os.path.join(BASE, "2020_CVPR_CSQ.py"),
-    os.path.join(BASE, "CSQ_BLIP.py"),
+    # os.path.join(BASE, "2020_CVPR_CSQ.py"),
+    # os.path.join(BASE, "CSQ_BLIP.py"),
     os.path.join(BASE, "CSQ_BLIP_2.py"),
 ]
 

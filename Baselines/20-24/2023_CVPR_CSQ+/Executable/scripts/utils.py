@@ -50,7 +50,7 @@ def get_config():
         # "dataset": "cifar10-1",
         "without_BN": False,
         "epoch": 120,
-        "eval_switch_epoch": 60,  # 前60轮 → test_map_1；后60轮 → test_map_2
+        "eval_switch_epoch": 90,  # 前60轮 → test_map_1；后60轮 → test_map_2
         "test_map_1": 30,  # 前半段评估间隔
         "test_map_2": 10,  # 后半段评估间隔
         "stop_iter": 10,

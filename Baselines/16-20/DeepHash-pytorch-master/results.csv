@@ -1,17 +1,17 @@
 Dataset,Method,64Bit,128Bit,Remark
-COCO,DHN,0.690,
-COCO,DSH,0.656,
-COCO,Orthohash,0.6932
+COCO,DHN,0.690(0.733),
+COCO,DSH,0.656(0.685),
+COCO,Orthohash,0.6932(0.759)
 COCO,LSCSH, ,,MAP1 (Image→Text): 0.7913 MAP2 (Text→Image): 0.8224
-COCO,SPRCH,0.836,,r²=0.674 Avg Loss: 0.2147
-COCO,CSQ,0.852,,
-COCO,CSQ+,0.7936,,0.7911(car_ims  net:resnet)
-COCO,CSQ_BLIP,0.835,,blip net
-COCO,CSQ_BLIP_2,0.899,,align loss + label to text encoder
+COCO,SPRCH,0.836(0.881),,r²=0.674 Avg Loss: 0.2147
+COCO,CSQ,0.852(0.897),,
+COCO,CSQ+,0.7936(0.886),,0.7911(car_ims  net:resnet)
+COCO,CSQ_BLIP_1,0.835(0.900),,blip net + visual encoder only
+COCO,CSQ_BLIP_2,0.899,,2fc align loss(mse) + label to text encoder
 COCO,CSQ_BLIP_3,0.902(0.948 when trainset 5w),,align loss + captions to text encoder   loss:0.406
 COCO,CSQ_BLIP_4,0.831(0.935),,align loss + contrast loss + captions to text encoder  total loss:2.891 = CSQ:0.507 (L_C:0.507 + L_Q:0.401) + Align:0.000 + ID:0.008 + Contrast:2.383 (α=1.00, β=0.05, λ=1.00, τ=0.07, mode:mse)
-COCO,CSQ_BLIP_5,0.902,,align loss + contrast loss + filtered captions to text encoder
-COCO,CSQ_BLIP_6,0.860,,align loss + contrast loss + csq+ loss + filtered captions to text encoder(可能縮小了通用性)loss:7.704 = CSQ+:7.701 ( L_C:6.727 + L_P:0.973 + L_Q:0.941 ) + Align:0.001 + ID:0.011 + Contrast:0.002
+COCO,CSQ_BLIP_5,0.902(0.947),,align loss + contrast loss + filtered captions to text encoder
+COCO,CSQ_BLIP_6,0.860(0.898),,align loss + contrast loss + csq+ loss + filtered captions to text encoder(可能縮小了通用性)loss:7.704 = CSQ+:7.701 ( L_C:6.727 + L_P:0.973 + L_Q:0.941 ) + Align:0.001 + ID:0.011 + Contrast:0.002
 
 
 CIFAR10,DHN,0.7820,

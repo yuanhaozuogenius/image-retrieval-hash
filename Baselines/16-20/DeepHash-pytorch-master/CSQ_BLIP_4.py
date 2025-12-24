@@ -69,7 +69,7 @@ def get_config():
         "caption_num_beams": 1,  # 建议 ≥2 以保证 sequences_scores 可用
         "caption_max_new_tokens": 32,  # 句长上限（越大越慢）
         "captions_num": 10,  # 固定采样数 K
-        "caption_prompt": "a photo of a",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
+        "caption_prompt": "a photo of",  # 提示词（caption 前缀） cifar不建议加，且BLIP-2对CIFAR这种小图的视觉辨识力有限
 
         # 同近异远
         "contrast_temp": 0.07,  # InfoNCE 温度
@@ -271,7 +271,7 @@ def train_val(config, bit):
     class2caps_prompt = {}
     for c in range(n_class):
         captions = class2caps.get(c, None)  # 取该类原始 caption 列表（list[str]）
-        prompted_caps = make_prompt_for_captions(prompt, captions) # list[str]
+        prompted_caps = make_prompt_for_captions(prompt, captions)  # list[str]
         class2caps_prompt[c] = prompted_caps  # dict
 
     # 释放 captioner 显存
@@ -391,10 +391,10 @@ def train_val(config, bit):
 
             # —— 文本侧：从 prompt_bank 取正样本锚 —— #
             with torch.no_grad():
-                if labels.ndim == 2 and labels.size(1) == 1:  # 多标签
-                    y_idx = labels.view(-1).long()
+                if (labels.sum(dim=1) > 1).any():  # 多标签  若labels第二维度的和>1的情况在当前batch中至少发生一次 → 至少存在一个多标签样本 → 返回True
+                    y_idx = labels.argmax(dim=1).long() # 需要改
                 else:  # 非多标签（单标签）
-                    y_idx = labels.argmax(dim=1).long()
+                    y_idx = labels.argmax(dim=1).long() # 把 one-hot恢复为class id(返回1对应的索引即为所代表的类别id)
 
                 # 调试更稳：用 CPU 做索引再搬回 GPU，避免 GPU 高级索引隐式同步
                 y_idx_cpu = y_idx.detach().cpu()

@@ -36,9 +36,9 @@ def get_config():
         # "dataset": "nuswide_21",
         # "dataset": "nuswide_21_m",
         # "dataset": "nuswide_81_m",
-        "epoch": 120,
-        "eval_switch_epoch": 60,   # 前60轮 → test_map_1；后60轮 → test_map_2
-        "test_map_1": 30,          # 前半段评估间隔
+        "epoch": 80,
+        "eval_switch_epoch": 40,   # 前60轮 → test_map_1；后60轮 → test_map_2
+        "test_map_1": 20,          # 前半段评估间隔
         "test_map_2": 10,          # 后半段评估间隔
         "save_path": "save/DHN",
         # "device":torch.device("cpu"),

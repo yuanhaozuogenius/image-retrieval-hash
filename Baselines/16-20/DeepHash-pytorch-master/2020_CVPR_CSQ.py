@@ -47,9 +47,9 @@ def get_config():
         "image_root": r"D:\Datasets\coco2017",
         # "dataset": "nuswide_21",
         # "dataset": "nuswide_21_m",
-        "epoch": 80,
-        "eval_switch_epoch": 40,  # 前60轮 → test_map_1；后60轮 → test_map_2
-        "test_map_1": 20,  # 前半段评估间隔
+        "epoch": 120,
+        "eval_switch_epoch": 90,  # 前60轮 → test_map_1；后60轮 → test_map_2
+        "test_map_1": 30,  # 前半段评估间隔
         "test_map_2": 10,  # 后半段评估间隔
         # "device":torch.device("cpu"),
         "device": torch.device("cuda:0"),
