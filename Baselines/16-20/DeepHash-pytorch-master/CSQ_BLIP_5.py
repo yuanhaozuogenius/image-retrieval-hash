@@ -82,8 +82,7 @@ def get_config():
 
         "filtered_captions_prompt_path": r"./tmp_data/filtered_captions_prompt.jsonl",
 
-
-                    "caption_save_path": "./data/{dataset}/captions.jsonl",  # 保存图像生成的caption文本，
+        "caption_save_path": "./data/{dataset}/captions.jsonl",  # 保存图像生成的caption文本，
         "filtered_caps_path": "./data/{dataset}/filtered_captions.jsonl",  # 保存过滤后的caption文本，
         "fc_path": "./trained_mappers/image_mapper.pth",  # 若没有可注释掉加载
         "med_config": "BLIP/configs/med_config.json",
@@ -319,16 +318,13 @@ def train_val(config, bit):
     # 3) Caption bank（负样本全集，逐条；并记录其类ID以便屏蔽本类）
     neg_texts, neg_cls_ids = [], []
     # 将过滤后的captions用于生成负样本
-    # 若 filtered_jsonl 存在则读取；否则基于 captions.jsonl 生成后再读取
-    filtered_captions = get_filtered_captions(config=config)  # dict
 
-    #  过率后的名词加提示词 a photo of 并拼接为一句final sentence
+    #  给gpt提示词后，输出过率后的名词加提示词 a photo of 并拼接为一句final sentence
     filtered_captions_prompt = {}
-    for c in range(n_class):
-        filtered_captions_prompt[c] = make_prompt_for_captions(prompt, filtered_captions.get(c, None))
-    # 打印filtered_captions_prompt
-    with open(config.get("filtered_captions_prompt_path"), "w", encoding="utf-8") as f:
-        f.write(json.dumps(filtered_captions_prompt, ensure_ascii=False))
+    jsonl_path = config["filtered_captions_prompt_path"]
+    with open(jsonl_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        filtered_captions_prompt = {int(k): v for k, v in data.items()}
 
     # 将“每类 caption 的关键句写入负样本库
     for c in range(n_class):
@@ -377,7 +373,9 @@ def train_val(config, bit):
     # if "save_path" in config:
     #     clean_save_dir_keep_best(config["save_path"], config["dataset"])
     Best_mAP = 0
-
+    final_losses = None
+    loss_save_path = os.path.join(
+        config.get("save_path"), f"{config['dataset']}_final_loss.json")
     for epoch in range(config["epoch"]):
 
         current_time = time.strftime('%H:%M:%S', time.localtime(time.time()))
@@ -406,7 +404,7 @@ def train_val(config, bit):
             labels = labels.to(device).float()
             if torch.cuda.is_available(): torch.cuda.synchronize()
 
-            # —— 文本侧：从 prompt_bank 取正样本锚 —— #
+            # —— 文本侧：从 caption_bank 取样本锚 —— #
             with torch.no_grad():
                 if (labels.sum(dim=1) > 1).any():  # 多标签  若labels第二维度的和>1的情况在当前batch中至少发生一次 → 至少存在一个多标签样本 → 返回True
                     # 多标签下每轮batch随机选一个正类，比固定只选第一个热标签好
@@ -478,7 +476,6 @@ def train_val(config, bit):
 
             contrast_loss = (-(log_num - log_den)).mean()
 
-
             if torch.cuda.is_available(): torch.cuda.synchronize()
 
             total_loss = csq_loss + align_weight * align_loss + beta * id_loss + contrast_weight * contrast_loss
@@ -507,7 +504,21 @@ def train_val(config, bit):
         align_loss_avg = align_loss_meter / n_iter
         id_loss_avg = id_loss_meter / n_iter
         contrast_loss_avg = contrast_loss_meter / n_iter
-
+        final_losses = {
+            "epoch": epoch + 1,
+            "total": train_loss_avg,
+            "CSQ": csq_loss_avg,
+            "L_C": center_loss_avg,
+            "L_Q": q_loss_avg,
+            "Align": align_loss_avg,
+            "ID": id_loss_avg,
+            "Contrast": contrast_loss_avg,
+            "alpha": align_weight,
+            "beta": beta,
+            "lambda": contrast_weight,
+            "tau": tau,
+            "align_mode": str(config.get("align_mode", "mse")),
+        }
         print(
             f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
             f"bit:{bit}, dataset:{config['dataset']}, "
@@ -543,6 +554,19 @@ def train_val(config, bit):
             print("%s epoch:%d, bit:%d, dataset:%s, MAP:%.3f, Best MAP: %.3f" % (
                 config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))
             # print(config)
+            # 保存最终 loss
+            if final_losses is not None:
+                os.makedirs(os.path.dirname(loss_save_path), exist_ok=True)
+                rec = {
+                    "info": config.get("info"),
+                    "dataset": config.get("dataset"),
+                    "bit": int(bit),
+                    "best_mAP": float(Best_mAP),
+                    **final_losses
+                }
+                with open(loss_save_path, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(rec, ensure_ascii=False, indent=2))
+                print(f"[final-loss] saved to {loss_save_path}")
 
     # === t-SNE after training ===
     tsne_after_path = f"./data/{config['dataset']}/train_tsne_after.png"

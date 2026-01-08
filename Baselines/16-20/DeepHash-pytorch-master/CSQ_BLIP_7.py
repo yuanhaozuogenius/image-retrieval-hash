@@ -40,7 +40,7 @@ def get_config():
     config = {
         "lambda": 0.0001,
         "optimizer": {"type": optim.RMSprop, "optim_params": {"lr": 1e-5, "weight_decay": 10 ** -5}},
-        "info": "[CSQ_BLIP_5]",
+        "info": "[CSQ_BLIP_7]",
         "resize_size": 224,
         "crop_size": 224,
         "batch_size": 64,
@@ -52,7 +52,7 @@ def get_config():
         "test_map_2": 10,  # 后半段评估间隔
         "device": torch.device("cuda:0"),
         "bit_list": [64],
-        "save_path": "save/CSQ_BLIP_5",
+        "save_path": "save/CSQ_BLIP_7",
         # "cifar10_dir": r"D:\Datasets\cifar10-image",  # 后续将实际数据路径设置在 image_root 中 方便统一修改
         "image_root": r"D:\Datasets\coco2017",
         # —— 跨模态对齐控制 —— #
@@ -82,17 +82,23 @@ def get_config():
 
         "caption_save_path": "./data/{dataset}/captions.jsonl",  # 保存图像生成的caption文本，
         # "filtered_caps_path": "./data/{dataset}/filtered_captions.jsonl",  # 保存过滤后的caption文本，
-        "filtered_captions_prompt_gpt_path": "./data/{dataset}/filtered_captions_prompt_gpt.jsonl", # 保存gpt过滤后的caption文本，
+        "filtered_captions_prompt_gpt_path": "./data/{dataset}/filtered_captions_prompt_gpt.jsonl",
+        # 保存gpt过滤后的caption文本，
         "fc_path": "./trained_mappers/image_mapper.pth",  # 若没有可注释掉加载
         "med_config": "BLIP/configs/med_config.json",
-        "blip_ckpt": "./models/model_base.pth"
+        "blip_ckpt": "./models/model_base.pth",
+
+        "t256_cache_path": "./data/{dataset}/t256_cache.pt"  # 保存预计算的t256_cache
     }
     config = config_dataset(config)
 
     # 将 {dataset} 替换为真实数据集名
+    config["t256_cache_path"] = config.get("t256_cache_path").replace("{dataset}", config["dataset"])
     config["caption_save_path"] = config.get("caption_save_path").replace("{dataset}", config["dataset"])
     # config["filtered_caps_path"] = config.get("filtered_caps_path").replace("{dataset}", config["dataset"])
-    config["filtered_captions_prompt_gpt_path"] = config.get("filtered_captions_prompt_gpt_path").replace("{dataset}", config["dataset"])
+    config["filtered_captions_prompt_gpt_path"] = config.get("filtered_captions_prompt_gpt_path").replace("{dataset}",
+                                                                                                          config[
+                                                                                                              "dataset"])
     config["all_train_data"] = config.get("all_train_data").replace("{dataset}", config["dataset"])
     return config
 
@@ -250,6 +256,7 @@ class AlignmentLoss(nn.Module):
         else:
             raise ValueError("Unsupported align mode")
 
+
 def train_val(config, bit):
     device = config["device"]
     train_loader, test_loader, dataset_loader, num_train, num_test, num_dataset = get_data(config)
@@ -349,39 +356,46 @@ def train_val(config, bit):
 
     # t256_cache 预计算
     # t256_cache: [num_train, 256]，放 CPU，训练时按 ind 取再搬到 GPU
-    net.eval() # net 切换到 推理模式（evaluation mode）:不反传,不更新参数
+    cache_path = config["t256_cache_path"]
+
+    net.eval()  # net 切换到 推理模式（evaluation mode）:不反传,不更新参数
     with torch.no_grad():
-        _tmp_dim = prompt_bank.size(1) #获取文本向量的维度
+        _tmp_dim = prompt_bank.size(1)  # 获取文本向量的维度
         t256_cache = torch.zeros((config["num_train"], _tmp_dim), dtype=torch.float32)  # CPU tensor
+        if os.path.exists(cache_path):
+            print(f"[INFO] Load t256_cache from {cache_path}")
+            t256_cache = torch.load(cache_path, map_location="cpu")
+        else:  # 预计算
+            print("[INFO] Build t256_cache ...")
+            for images, labels, ind, paths in train_loader:
+                if isinstance(labels, np.ndarray):  # labels 可能是 numpy
+                    labels = torch.from_numpy(labels)
+                labels = labels.float()  # CPU 即可
+                ind_cpu = ind.detach().cpu().long()
 
-        for images, labels, ind, paths in train_loader:
-            if isinstance(labels, np.ndarray):    # labels 可能是 numpy
-                labels = torch.from_numpy(labels)
-            labels = labels.float()  # CPU 即可
-            ind_cpu = ind.detach().cpu().long()
+                # 按监督标签拼多标签句子（完全不依赖 caption）
+                batch_texts = []  # 存放当前batch中，每张图像的“标签生成的文本句子:  text_for_image_0,text_for_image_1,....
+                for b in range(labels.size(0)):
+                    pos_ids = torch.nonzero(labels[b] > 0).view(-1).tolist()
+                    # 取对应的类名
+                    names = [class_names[i] for i in pos_ids]
+                    # 拼成 "A and B and C"
+                    joined = " and ".join(names)
+                    text = f"{prompt.strip()} {joined}".strip()
+                    batch_texts.append(text)
 
-            # 按监督标签拼多标签句子（完全不依赖 caption）
-            batch_texts = []  # 存放当前batch中，每张图像的“标签生成的文本句子:  text_for_image_0,text_for_image_1,....
-            for b in range(labels.size(0)):
-                pos_ids = torch.nonzero(labels[b] > 0).view(-1).tolist()
-                # 取对应的类名
-                names = [class_names[i] for i in pos_ids]
-                # 拼成 "A and B and C"
-                joined = " and ".join(names)
-                text = f"{prompt.strip()} {joined}".strip()
-                batch_texts.append(text)
-
-            # 编码得到 [B,256]（一般在 CPU），写入 cache
-            t256_b = net.text_encoder.encode(batch_texts)  # 不要 .to(device)，先留 CPU
-            if isinstance(t256_b, torch.Tensor) and t256_b.device.type != "cpu":
-                t256_b = t256_b.detach().cpu()
-            t256_cache[ind_cpu] = t256_b
+                # 编码得到 [B,256]（一般在 CPU），写入 cache
+                t256_b = net.text_encoder.encode(batch_texts)  # 不要 .to(device)，先留 CPU
+                if isinstance(t256_b, torch.Tensor) and t256_b.device.type != "cpu":
+                    t256_b = t256_b.detach().cpu()
+                t256_cache[ind_cpu] = t256_b
+                torch.save(t256_cache, cache_path)
 
     # TextEncoder用完后, 清理模型显存
-    # print("Before del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
+    print("Before del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
     del net.text_encoder
     torch.cuda.empty_cache()
-    # print("After  del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
+    print("After  del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
 
     tau = float(config.get("contrast_temp", 0.07))  # 可学习的温度参数，用于控制概率分布的尖锐程度
     contrast_weight = float(config.get("contrast_weight", 1.0))
@@ -407,6 +421,9 @@ def train_val(config, bit):
     # if "save_path" in config:
     #     clean_save_dir_keep_best(config["save_path"], config["dataset"])
     Best_mAP = 0
+    final_losses = None
+    loss_save_path = os.path.join(
+        config.get("save_path"), f"{config['dataset']}_final_loss.json")
 
     for epoch in range(config["epoch"]):
 
@@ -498,7 +515,6 @@ def train_val(config, bit):
 
             contrast_loss = (-(log_num - log_den)).mean()
 
-
             if torch.cuda.is_available(): torch.cuda.synchronize()
 
             total_loss = csq_loss + align_weight * align_loss + beta * id_loss + contrast_weight * contrast_loss
@@ -527,7 +543,21 @@ def train_val(config, bit):
         align_loss_avg = align_loss_meter / n_iter
         id_loss_avg = id_loss_meter / n_iter
         contrast_loss_avg = contrast_loss_meter / n_iter
-
+        final_losses = {
+            "epoch": epoch + 1,
+            "total": train_loss_avg,
+            "CSQ": csq_loss_avg,
+            "L_C": center_loss_avg,
+            "L_Q": q_loss_avg,
+            "Align": align_loss_avg,
+            "ID": id_loss_avg,
+            "Contrast": contrast_loss_avg,
+            "alpha": align_weight,
+            "beta": beta,
+            "lambda": contrast_weight,
+            "tau": tau,
+            "align_mode": str(config.get("align_mode", "mse")),
+        }
         print(
             f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
             f"bit:{bit}, dataset:{config['dataset']}, "
@@ -563,6 +593,19 @@ def train_val(config, bit):
             print("%s epoch:%d, bit:%d, dataset:%s, MAP:%.3f, Best MAP: %.3f" % (
                 config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))
             # print(config)
+            # 保存最终 loss
+            if final_losses is not None:
+                os.makedirs(os.path.dirname(loss_save_path), exist_ok=True)
+                rec = {
+                    "info": config.get("info"),
+                    "dataset": config.get("dataset"),
+                    "bit": int(bit),
+                    "best_mAP": float(Best_mAP),
+                    **final_losses
+                }
+                with open(loss_save_path, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(rec, ensure_ascii=False, indent=2))
+                print(f"[final-loss] saved to {loss_save_path}")
 
     # === t-SNE after training ===
     tsne_after_path = f"./data/{config['dataset']}/train_tsne_after.png"

@@ -360,6 +360,9 @@ def train_val(config, bit):
     # if "save_path" in config:
     #     clean_save_dir_keep_best(config["save_path"], config["dataset"])
     Best_mAP = 0
+    final_losses = None
+    loss_save_path = os.path.join(
+        config.get("save_path"), f"{config['dataset']}_final_loss.json")
 
     for epoch in range(config["epoch"]):
 
@@ -484,6 +487,21 @@ def train_val(config, bit):
         align_loss_avg = align_loss_meter / n_iter
         id_loss_avg = id_loss_meter / n_iter
         contrast_loss_avg = contrast_loss_meter / n_iter
+        final_losses = {
+            "epoch": epoch + 1,
+            "total": train_loss_avg,
+            "CSQ": csq_loss_avg,
+            "L_C": center_loss_avg,
+            "L_Q": q_loss_avg,
+            "Align": align_loss_avg,
+            "ID": id_loss_avg,
+            "Contrast": contrast_loss_avg,
+            "alpha": align_weight,
+            "beta": beta,
+            "lambda": contrast_weight,
+            "tau": tau,
+            "align_mode": str(config.get("align_mode", "mse")),
+        }
 
         print(
             f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
@@ -520,6 +538,19 @@ def train_val(config, bit):
             print("%s epoch:%d, bit:%d, dataset:%s, MAP:%.3f, Best MAP: %.3f" % (
                 config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))
             # print(config)
+            # 保存最终 loss
+            if final_losses is not None:
+                os.makedirs(os.path.dirname(loss_save_path), exist_ok=True)
+                rec = {
+                    "info": config.get("info"),
+                    "dataset": config.get("dataset"),
+                    "bit": int(bit),
+                    "best_mAP": float(Best_mAP),
+                    **final_losses
+                }
+                with open(loss_save_path, "w", encoding="utf-8") as f:
+                    f.write(json.dumps(rec, ensure_ascii=False, indent=2))
+                print(f"[final-loss] saved to {loss_save_path}")
 
 
 if __name__ == "__main__":
