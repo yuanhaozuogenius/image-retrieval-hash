@@ -12,7 +12,7 @@ import torchvision.datasets as dsets
 import json
 import time
 from torch.utils.data import Dataset
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Union
 import torch.nn.functional as F
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
@@ -21,6 +21,7 @@ from sentence_transformers import SentenceTransformer
 from keybert import KeyBERT
 import spacy
 import gc
+
 
 """
 根据数据集名称设置分类数、topK 评价范围和数据路径等信息。
