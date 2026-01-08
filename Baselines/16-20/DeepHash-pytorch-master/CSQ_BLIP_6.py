@@ -327,7 +327,6 @@ def train_val(config, bit):
     # if "save_path" in config:
     #     clean_save_dir_keep_best(config["save_path"], config["dataset"])
     Best_mAP = 0
-    final_losses = None
     loss_save_path = os.path.join(
         config.get("save_path"), f"{config['dataset']}_final_loss.json")
 
@@ -457,27 +456,14 @@ def train_val(config, bit):
         center_loss_avg = center_loss_meter / n_iter
         pair_loss_avg = pair_loss_meter / n_iter
         q_loss_avg = q_loss_meter / n_iter
-        final_losses = {
-            "epoch": epoch + 1,
-            "total": train_loss_avg,
-            "CSQ+": csq_plus_loss_avg,
-            "L_C": center_loss_avg,
-            "L_P": pair_loss_avg,
-            "L_Q": q_loss_avg,
-            "Align": align_loss_avg,
-            "ID": id_loss_avg,
-            "Contrast": contrast_loss_avg,
-            "alpha": align_weight,
-            "lambda": contrast_weight,
-            "tau": tau,
-            "align_mode": str(config.get("align_mode", "mse")),
-        }
-        print(f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
-              f"dataset:{config['dataset']}, bit:{bit},"
-              f"total loss:{train_loss_avg:.3f} = "
-              f"CSQ+:{csq_plus_loss_avg:.3f} ( "
-              f"L_C:{center_loss_avg:.3f} + L_P:{pair_loss_avg:.3f} + L_Q:{q_loss_avg:.3f} ) "
-              f"+ Align:{align_loss_avg:.3f} + ID:{id_loss_avg:.3f} + Contrast:{contrast_loss_avg:.3f}")
+        final_log_str = (
+            f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
+            f"dataset:{config['dataset']}, bit:{bit},"
+            f"total loss:{train_loss_avg:.3f} = "
+            f"CSQ+:{csq_plus_loss_avg:.3f} ( "
+            f"L_C:{center_loss_avg:.3f} + L_P:{pair_loss_avg:.3f} + L_Q:{q_loss_avg:.3f} ) "
+            f"+ Align:{align_loss_avg:.3f} + ID:{id_loss_avg:.3f} + Contrast:{contrast_loss_avg:.3f}")
+        print(final_log_str)
 
         # 评估与保存
         if (epoch + 1) % eval_interval == 0:
@@ -507,18 +493,12 @@ def train_val(config, bit):
                 config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))
             # print(config)
             # 保存最终 loss
-            if final_losses is not None:
-                os.makedirs(os.path.dirname(loss_save_path), exist_ok=True)
-                rec = {
-                    "info": config.get("info"),
-                    "dataset": config.get("dataset"),
-                    "bit": int(bit),
-                    "best_mAP": float(Best_mAP),
-                    **final_losses
-                }
-                with open(loss_save_path, "w", encoding="utf-8") as f:
-                    f.write(json.dumps(rec, ensure_ascii=False, indent=2))
-                print(f"[final-loss] saved to {loss_save_path}")
+            os.makedirs(os.path.dirname(loss_save_path), exist_ok=True)
+            with open(loss_save_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "log": final_log_str
+                }, ensure_ascii=False) + "\n")
+            print(f"[final-loss] saved to {loss_save_path}")
 
     # === t-SNE after training ===
     tsne_after_path = f"./data/{config['dataset']}/train_tsne_after.png"

@@ -360,7 +360,6 @@ def train_val(config, bit):
     # if "save_path" in config:
     #     clean_save_dir_keep_best(config["save_path"], config["dataset"])
     Best_mAP = 0
-    final_losses = None
     loss_save_path = os.path.join(
         config.get("save_path"), f"{config['dataset']}_final_loss.json")
 
@@ -395,9 +394,9 @@ def train_val(config, bit):
             # —— 文本侧：从 prompt_bank 取正样本锚 —— #
             with torch.no_grad():
                 if (labels.sum(dim=1) > 1).any():  # 多标签  若labels第二维度的和>1的情况在当前batch中至少发生一次 → 至少存在一个多标签样本 → 返回True
-                    y_idx = labels.argmax(dim=1).long() # 需要改
+                    y_idx = labels.argmax(dim=1).long()  # 需要改
                 else:  # 非多标签（单标签）
-                    y_idx = labels.argmax(dim=1).long() # 把 one-hot恢复为class id(返回1对应的索引即为所代表的类别id)
+                    y_idx = labels.argmax(dim=1).long()  # 把 one-hot恢复为class id(返回1对应的索引即为所代表的类别id)
 
                 # 调试更稳：用 CPU 做索引再搬回 GPU，避免 GPU 高级索引隐式同步
                 y_idx_cpu = y_idx.detach().cpu()
@@ -487,23 +486,7 @@ def train_val(config, bit):
         align_loss_avg = align_loss_meter / n_iter
         id_loss_avg = id_loss_meter / n_iter
         contrast_loss_avg = contrast_loss_meter / n_iter
-        final_losses = {
-            "epoch": epoch + 1,
-            "total": train_loss_avg,
-            "CSQ": csq_loss_avg,
-            "L_C": center_loss_avg,
-            "L_Q": q_loss_avg,
-            "Align": align_loss_avg,
-            "ID": id_loss_avg,
-            "Contrast": contrast_loss_avg,
-            "alpha": align_weight,
-            "beta": beta,
-            "lambda": contrast_weight,
-            "tau": tau,
-            "align_mode": str(config.get("align_mode", "mse")),
-        }
-
-        print(
+        final_log_str = (
             f"{config['info']}[{epoch + 1:>2}/{config['epoch']}][{current_time}] "
             f"bit:{bit}, dataset:{config['dataset']}, "
             f"total loss:{train_loss_avg:.3f} = "
@@ -511,6 +494,7 @@ def train_val(config, bit):
             f"+ Align:{align_loss_avg:.3f} + ID:{id_loss_avg:.3f} + Contrast:{contrast_loss_avg:.3f} "
             f"(α={align_weight:.2f}, β={beta:.2f}, λ={contrast_weight:.2f}, τ={tau:.2f}, mode:{config.get('align_mode', 'mse')})"
         )
+        print(final_log_str)
         # 评估与保存
         if (epoch + 1) % eval_interval == 0:
             tst_binary, tst_label = compute_result(test_loader, net, device=device)
@@ -539,18 +523,12 @@ def train_val(config, bit):
                 config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))
             # print(config)
             # 保存最终 loss
-            if final_losses is not None:
-                os.makedirs(os.path.dirname(loss_save_path), exist_ok=True)
-                rec = {
-                    "info": config.get("info"),
-                    "dataset": config.get("dataset"),
-                    "bit": int(bit),
-                    "best_mAP": float(Best_mAP),
-                    **final_losses
-                }
-                with open(loss_save_path, "w", encoding="utf-8") as f:
-                    f.write(json.dumps(rec, ensure_ascii=False, indent=2))
-                print(f"[final-loss] saved to {loss_save_path}")
+            os.makedirs(os.path.dirname(loss_save_path), exist_ok=True)
+            with open(loss_save_path, "w", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "log": final_log_str
+                }, ensure_ascii=False) + "\n")
+            print(f"[final-loss] saved to {loss_save_path}")
 
 
 if __name__ == "__main__":
