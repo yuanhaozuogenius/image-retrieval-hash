@@ -347,10 +347,40 @@ def train_val(config, bit):
             # 如果相同，就要把这些 caption 当作“本类”并屏蔽掉（不作为负样本）
             neg_cls_ids = torch.tensor(neg_cls_ids, device=device, dtype=torch.long)  # [Nneg]
 
+    # t256_cache 预计算
+    # t256_cache: [num_train, 256]，放 CPU，训练时按 ind 取再搬到 GPU
+    net.eval() # net 切换到 推理模式（evaluation mode）:不反传,不更新参数
+    with torch.no_grad():
+        _tmp_dim = prompt_bank.size(1) #获取文本向量的维度
+        t256_cache = torch.zeros((config["num_train"], _tmp_dim), dtype=torch.float32)  # CPU tensor
+
+        for images, labels, ind, paths in train_loader:
+            if isinstance(labels, np.ndarray):    # labels 可能是 numpy
+                labels = torch.from_numpy(labels)
+            labels = labels.float()  # CPU 即可
+            ind_cpu = ind.detach().cpu().long()
+
+            # 按监督标签拼多标签句子（完全不依赖 caption）
+            batch_texts = []  # 存放当前batch中，每张图像的“标签生成的文本句子:  text_for_image_0,text_for_image_1,....
+            for b in range(labels.size(0)):
+                pos_ids = torch.nonzero(labels[b] > 0).view(-1).tolist()
+                # 取对应的类名
+                names = [class_names[i] for i in pos_ids]
+                # 拼成 "A and B and C"
+                joined = " and ".join(names)
+                text = f"{prompt.strip()} {joined}".strip()
+                batch_texts.append(text)
+
+            # 编码得到 [B,256]（一般在 CPU），写入 cache
+            t256_b = net.text_encoder.encode(batch_texts)  # 不要 .to(device)，先留 CPU
+            if isinstance(t256_b, torch.Tensor) and t256_b.device.type != "cpu":
+                t256_b = t256_b.detach().cpu()
+            t256_cache[ind_cpu] = t256_b
+
     # TextEncoder用完后, 清理模型显存
     # print("Before del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
-    # del net.text_encoder
-    # torch.cuda.empty_cache()
+    del net.text_encoder
+    torch.cuda.empty_cache()
     # print("After  del text_encoder:", torch.cuda.memory_allocated() / (1024 ** 3), "GB")
 
     tau = float(config.get("contrast_temp", 0.07))  # 可学习的温度参数，用于控制概率分布的尖锐程度
@@ -408,19 +438,7 @@ def train_val(config, bit):
 
             # —— 文本侧：从 prompt_bank 取正样本锚 —— #
             with torch.no_grad():
-                batch_texts = [] # 存放当前batch中，每张图像的“标签生成的文本句子:  text_for_image_0,text_for_image_1,....
-                for b in range(labels.size(0)):
-                    # labels[b]: [C] multi-hot / one-hot
-                    pos_ids = torch.nonzero(labels[b] > 0).view(-1).tolist()
-                    # 取对应的类名
-                    names = [class_names[i] for i in pos_ids]
-                    # 拼成 "A and B and C"
-                    joined = " and ".join(names)
-                    text = f"{prompt.strip()} {joined}".strip()                     # 加 prompt 前缀
-                    batch_texts.append(text)
-                # 文本编码（由标签生成）
-                t256 = net.text_encoder.encode(batch_texts).to(device)
-
+                t256 = t256_cache[ind.detach().cpu().long()].to(device)
             if torch.cuda.is_available(): torch.cuda.synchronize()
 
             # —— 清梯度，防止梯度累计—— #
