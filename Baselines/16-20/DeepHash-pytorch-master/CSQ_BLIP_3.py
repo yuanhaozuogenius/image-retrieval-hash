@@ -334,6 +334,7 @@ def train_val(config, bit):
     # if "save_path" in config:
     #     clean_save_dir_keep_best(config["save_path"], config["dataset"])
     Best_mAP = 0
+    final_log_str = None
     loss_save_path = os.path.join(
         config.get("save_path"), f"{config['dataset']}_final_loss.json")
 
@@ -463,13 +464,13 @@ def train_val(config, bit):
             print("%s epoch:%d, bit:%d, dataset:%s, MAP:%.3f, Best MAP: %.3f" % (
                 config["info"], epoch + 1, bit, config["dataset"], mAP, Best_mAP))
             # print(config)
-            # 保存最终 loss
-            os.makedirs(os.path.dirname(loss_save_path), exist_ok=True)
-            with open(loss_save_path, "w", encoding="utf-8") as f:
-                f.write(json.dumps({
-                    "log": final_log_str
-                }, ensure_ascii=False) + "\n")
-            print(f"[final-loss] saved to {loss_save_path}")
+    # 保存最终 loss
+    os.makedirs(os.path.dirname(loss_save_path), exist_ok=True)
+    with open(loss_save_path, "w", encoding="utf-8") as f:
+        f.write(json.dumps({
+            "log": final_log_str
+        }, ensure_ascii=False) + "\n")
+    print(f"[final-loss] saved to {loss_save_path}")
 
 
 if __name__ == "__main__":
