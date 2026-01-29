@@ -362,11 +362,11 @@ def train_val(config, bit):
     Best_mAP = 0
     final_log_str = None
     loss_save_path = os.path.join(
-        config.get("save_path"), f"{config['dataset']}_final_loss.json")
+        config.get("save_path"), f"{config['dataset']}_final_loss.jsonl")
 
     for epoch in range(config["epoch"]):
 
-        current_time = time.strftime('%H:%M:%S', time.localtime(time.time()))
+        current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
         # —— 动态评估间隔 —— #
         if epoch < config["eval_switch_epoch"]:
             eval_interval = config["test_map_1"]
@@ -525,8 +525,9 @@ def train_val(config, bit):
             # print(config)
     # 保存最终 loss
     os.makedirs(os.path.dirname(loss_save_path), exist_ok=True)
-    with open(loss_save_path, "w", encoding="utf-8") as f:
+    with open(loss_save_path, "a", encoding="utf-8") as f:
         f.write(json.dumps({
+            "best_mAP": float(Best_mAP),
             "log": final_log_str
         }, ensure_ascii=False) + "\n")
     print(f"[final-loss] saved to {loss_save_path}")

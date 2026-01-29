@@ -672,7 +672,7 @@ def get_filtered_captions(
     filtered_jsonl_path = config.get("filtered_caps_path")
     caption_cache_path = config.get("caption_save_path")
     dataset = config.get("dataset")
-    kb_dir = config.get("")
+    kb_dir = config.get("keybert_model_dir")
 
     # A) 若过滤结果已存在，则读取
     if os.path.isfile(filtered_jsonl_path):
